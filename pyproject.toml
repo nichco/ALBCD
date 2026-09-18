@@ -1,1 +1,40 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
 
+[project]
+name = "albcd"
+dynamic = ["version"]
+description = "Augmented Lagrangian block coordinate descent (ALBCD) for block-structured constrained optimization"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Nicholas Orndorff" }]
+requires-python = ">=3.9"
+dependencies = ["numpy"]
+keywords = ["optimization", "augmented lagrangian", "block coordinate descent", "distributed optimization"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Mathematics",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+examples = [
+    "matplotlib",
+    "jax",
+    "torch",
+    "cvxopt",
+    "modopt @ git+https://github.com/lsdolab/modopt.git@main",
+]
+
+[project.urls]
+Repository = "https://github.com/nichco/ALBCD"
+
+[tool.setuptools.dynamic]
+version = { attr = "albcd.__version__" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
