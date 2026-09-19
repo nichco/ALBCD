@@ -134,12 +134,14 @@ class AeroSubproblem(Subproblem):
 class StructSubproblem(Subproblem):
     """Owns [thickness_cp, aero_loads_copy]: sizes the spar so both tip displacements equal the target."""
 
-    X_SCALER = np.concatenate([np.full(num_cp_thickness, 1e2), np.full(2 * num_nodes, 1e-2)])  # thickness_cp, aero_loads_copy
+    # thickness_cp, drag copies, lift copies. The drag loads are ~100x smaller than the lift
+    # loads, so they get their own scaler; a larger thickness scaler would magnify SLSQP's
+    # termination error in residual(), which is measured in unscaled variables.
+    X_SCALER = np.concatenate([np.full(num_cp_thickness, 1e1), np.full(num_nodes, 1.0), np.full(num_nodes, 1e-2)])
     C_SCALER = 1e1  # tip displacements
-    # SLSQP tolerance. Tighter than AeroSubproblem's because residual() is measured in unscaled
-    # variables, where the thickness scaler of 1e2 magnifies SLSQP's termination error: with
-    # 1e-8, this block's residual stalls around 2e-3, above the final opt_tol of 1e-3.
-    FTOL = 1e-10
+    # SLSQP tolerance. Tighter than AeroSubproblem's: with 1e-8, this block's residual
+    # stalls above the final opt_tol of 1e-3.
+    FTOL = 1e-9
 
     # thickness_cp in [min gauge, smallest tube radius], aero_loads_copy unbounded. The
     # B-spline basis is nonnegative and sums to one, so every element's thickness is a
