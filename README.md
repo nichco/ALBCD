@@ -29,7 +29,7 @@ constraint couples the two blocks and is written as the equality
 `(x1, s)` and block 2 owns `x2`. Each block's subproblem is solved with modopt's
 SLSQP using gradients from PyTorch, so this needs the `[examples]` install above.
 It is a condensed version of
-[examples/pytorch/quadratic_global_circle.py](examples/pytorch/quadratic_global_circle.py).
+[examples/pytorch/quadratic_global_circle.py](https://github.com/nichco/ALBCD/blob/main/examples/pytorch/quadratic_global_circle.py).
 
 ```python
 import numpy as np
@@ -145,7 +145,7 @@ print(opt.success, opt.x)  # True, approximately [0.354 0. 0.354]: x1 = x2 = sqr
 
 ## Examples
 
-See [examples/](examples/README.md). Every problem is included twice, once with
+See [examples/](https://github.com/nichco/ALBCD/tree/main/examples). Every problem is included twice, once with
 gradients from JAX and once from PyTorch.
 
 ## Tests

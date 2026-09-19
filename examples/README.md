@@ -10,3 +10,6 @@ pip install -e ".[examples]"
 ```
 
 and run any example directly, e.g. `python examples/pytorch/rosenbrock_consensus.py`.
+
+A larger aerostructural wing design example, in PyTorch only, is in
+[pytorch/aerostruct/](pytorch/aerostruct/README.md).

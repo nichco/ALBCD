@@ -8,7 +8,7 @@ has the solution x0 = x1 = (a + b) / 2 with multiplier y = a - b.
 import numpy as np
 import pytest
 
-from albcd import ALBCD, AugmentedLagrangianBlockCoordinateDescent, Subproblem
+from albcd import ALBCD, Subproblem
 
 A, B = 1.0, 3.0
 
@@ -48,7 +48,7 @@ def make_solver(**kwargs):
     options = dict(subproblems=[Block(0, A), Block(1, B)], x0=np.zeros(2), mu0=np.ones(1),
                    feas_tol=1e-8, opt_tol=1e-10, max_inner_iter=100, verbose=False)
     options.update(kwargs)
-    return AugmentedLagrangianBlockCoordinateDescent(**options)
+    return ALBCD(**options)
 
 
 @pytest.mark.parametrize("opt_tol", [1e-10, [1e-2, 1e-10]])
@@ -81,10 +81,6 @@ def test_verbose_output(capsys):
     assert "Phase 1 complete, starting phase 2" in lines
     assert lines[-2].startswith(f"outer {n:3d} | feas ")
     assert lines[-1].startswith(f"Converged after {n} outer iterations")
-
-
-def test_alias():
-    assert ALBCD is AugmentedLagrangianBlockCoordinateDescent
 
 
 def test_history():

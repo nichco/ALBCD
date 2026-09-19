@@ -18,6 +18,7 @@ class Subproblem:
     """
 
     def __init__(self, index):
+        """Set up the subproblem and call :meth:`setup`. ``index`` is described above."""
         self.index = index # slice/array selecting this block's entries out of x
         self.inputs = {}
         self.outputs = {}

@@ -1,10 +1,10 @@
-"""Augmented Lagrangian block coordinate descent (ALBCD)."""
+"""
+.. include:: ../../README.md
+"""
 
-from .albcd import AugmentedLagrangianBlockCoordinateDescent
+from .albcd import ALBCD
 from .subproblem import Subproblem
-
-ALBCD = AugmentedLagrangianBlockCoordinateDescent  # short alias
 
 __version__ = "0.1.0"
 
-__all__ = ["ALBCD", "AugmentedLagrangianBlockCoordinateDescent", "Subproblem"]
+__all__ = ["ALBCD", "Subproblem"]

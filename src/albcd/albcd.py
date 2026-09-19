@@ -6,7 +6,7 @@ from typing import Optional, Sequence, Union
 import numpy as np
 
 
-class AugmentedLagrangianBlockCoordinateDescent():
+class ALBCD():
     """Augmented Lagrangian block coordinate descent (ALBCD).
 
     Solves ``min f(x)  s.t.  phi(x) = 0``, where ``x`` is partitioned into
@@ -92,6 +92,7 @@ class AugmentedLagrangianBlockCoordinateDescent():
                  save: bool = True,
                  verbose: bool = True,
                  ):
+        """Set up the solver. The parameters are described above."""
 
         self.subproblems = subproblems
         self.x = np.array(x0, dtype=float) # copy, so the caller's x0 is never modified
