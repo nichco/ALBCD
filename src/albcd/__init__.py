@@ -1,5 +1,6 @@
 """
 .. include:: ../../README.md
+   :start-after: # ALBCD
 """
 
 from .albcd import ALBCD

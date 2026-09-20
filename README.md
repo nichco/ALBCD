@@ -1,6 +1,13 @@
 # ALBCD
-Augmented Lagrangian block coordinate descent
 
+**Augmented Lagrangian block coordinate descent**
+
+Augmented Lagrangian block coordinate descent (ALBCD) is a coordination scheme for distributed
+multidisciplinary design optimization (MDO) problems. To use ALBCD, MDO problems are first
+decomposed into subproblems. These subproblems are formulated with relaxed constraints and then
+solved iteratively using the block coordinate descent algorithm. An outer loop enforces the relaxed
+constraints using the augmented Lagrangian method. In some scenarios, ALBCD can be used to
+reduce computational cost and/or enable geographically distributed optimization.
 
 ## Installation
 
@@ -9,8 +16,8 @@ pip install git+https://github.com/nichco/ALBCD.git
 ```
 
 The core package only depends on numpy. To run the examples, which also need
-[modopt](https://github.com/LSDOlab/modopt), JAX, PyTorch, CVXOPT and matplotlib,
-install from a clone:
+[modopt](https://github.com/LSDOlab/modopt), [JAX](https://docs.jax.dev),
+[PyTorch](https://pytorch.org), CVXOPT and matplotlib, install from a clone:
 
 ```bash
 git clone https://github.com/nichco/ALBCD.git
@@ -157,3 +164,25 @@ pytest
 
 The example tests are skipped if modopt, matplotlib or the autodiff
 library (JAX or PyTorch) isn't installed.
+
+## References
+
+The following papers describe early variants of the ALBCD coordination scheme:
+
+```bibtex
+@inproceedings{orndorff2026distributed,
+  author    = {Orndorff, Nicholas C. and Lupp, Christopher and Hwang, John T.},
+  title     = {{A Distributed Algorithm for Large-Scale Multidisciplinary Design Optimization With Global Constraints}},
+  booktitle = {AIAA AVIATION 2026 Forum},
+  year      = {2026},
+  doi       = {10.2514/6.2026-4500},
+}
+
+@inproceedings{orndorff2025distributed,
+  author    = {Orndorff, Nicholas C. and Hwang, John T.},
+  title     = {{A Distributed Method for Solving Large-Scale Multidisciplinary Optimization Problems}},
+  booktitle = {AIAA AVIATION Forum and ASCEND 2025},
+  year      = {2025},
+  doi       = {10.2514/6.2025-3736},
+}
+```
