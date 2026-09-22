@@ -3,11 +3,7 @@
 **Augmented Lagrangian block coordinate descent**
 
 Augmented Lagrangian block coordinate descent (ALBCD) is a coordination scheme for distributed
-multidisciplinary design optimization (MDO) problems. To use ALBCD, MDO problems are first
-decomposed into subproblems. These subproblems are formulated with relaxed constraints and then
-solved iteratively using the block coordinate descent algorithm. An outer loop enforces the relaxed
-constraints using the augmented Lagrangian method. In some scenarios, ALBCD can be used to
-reduce computational cost and/or enable geographically distributed optimization.
+multidisciplinary design optimization (MDO) problems. To use ALBCD, MDO problems are first decomposed into subproblems. These subproblems are formulated with relaxed constraints and a new augmemted Lagrangian merit function instead of the original objective function. The ALBCD coordination scheme iteratively solves each subproblem using the block coordinate descent algorithm in an inner loop, while an outer loop enforces the relaxed constraints using the augmented Lagrangian method. In some scenarios, ALBCD can be used to reduce computational cost and/or enable geographically distributed optimization.
 
 ## Installation
 
@@ -15,9 +11,7 @@ reduce computational cost and/or enable geographically distributed optimization.
 pip install git+https://github.com/nichco/ALBCD.git
 ```
 
-The core package only depends on numpy. To run the examples, which also need
-[modopt](https://github.com/LSDOlab/modopt), [JAX](https://docs.jax.dev),
-[PyTorch](https://pytorch.org), CVXOPT and matplotlib, install from a clone:
+The core package only depends on numpy. The examples require [modopt](https://github.com/LSDOlab/modopt) for optimization and either [JAX](https://docs.jax.dev) or [PyTorch](https://pytorch.org) for automatic differentiation. Some examples also require CVXOPT and/or matplotlib. To install all of the dependencies required to run the examples, install from a clone:
 
 ```bash
 git clone https://github.com/nichco/ALBCD.git
@@ -25,16 +19,16 @@ cd ALBCD
 pip install -e ".[examples]"
 ```
 
-ModOpt is installed from GitHub
+ModOpt can be installed from GitHub
 (`pip install git+https://github.com/lsdolab/modopt.git@main`)
 
 ## Quick start
 
 Minimize `x1^2 + x2^2 - 1.5 x1 x2` subject to `x1^2 + x2^2 >= 0.25`. The
 constraint couples the two blocks and is written as the equality
-`phi = 0.25 - x1^2 - x2^2 + s = 0` with a slack `s >= 0`. Block 1 owns
-`(x1, s)` and block 2 owns `x2`. Each block's subproblem is solved with modopt's
-SLSQP using gradients from PyTorch, so this needs the `[examples]` install above.
+`phi = 0.25 - x1^2 - x2^2 + s = 0` with a slack variable `s >= 0`. Block 1 owns the variables
+`(x1, s)` and block 2 owns the variables `x2`. Each block's subproblem is solved with modopt's
+SLSQP using gradients from PyTorch, so this needs the `[examples]` dependency install above.
 It is a condensed version of
 [examples/pytorch/quadratic_global_circle.py](https://github.com/nichco/ALBCD/blob/main/examples/pytorch/quadratic_global_circle.py).
 
@@ -152,8 +146,7 @@ print(opt.success, opt.x)  # True, approximately [0.354 0. 0.354]: x1 = x2 = sqr
 
 ## Examples
 
-See [examples/](https://github.com/nichco/ALBCD/tree/main/examples). Every problem is included twice, once with
-gradients from JAX and once from PyTorch.
+See [examples/](https://github.com/nichco/ALBCD/tree/main/examples). Every problem is included twice, once with gradients from JAX and once from PyTorch.
 
 ## Tests
 
