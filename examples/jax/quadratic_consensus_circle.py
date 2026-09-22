@@ -9,6 +9,7 @@ Gradients come from JAX. Run this file to solve the problem and plot the iterate
 import numpy as np
 import modopt as mo
 import jax
+jax.config.update("jax_enable_x64", True) # jax defaults to float32
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from albcd import ALBCD, Subproblem

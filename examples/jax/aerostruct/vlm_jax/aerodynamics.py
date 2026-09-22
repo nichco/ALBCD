@@ -1,0 +1,428 @@
+"""Vortex-lattice aerodynamics: deformed mesh -> circulations -> panel forces
+-> CL/CD.
+
+Ports (single-surface, symmetry=True, no ground effect, no rotational
+velocities, incompressible i.e. non-Prandtl-Glauert states):
+  openaerostruct/aerodynamics/geometry.py             (VLMGeometry)
+  openaerostruct/aerodynamics/collocation_points.py    (CollocationPoints)
+  openaerostruct/aerodynamics/vortex_mesh.py           (VortexMesh)
+  openaerostruct/aerodynamics/get_vectors.py           (GetVectors)
+  openaerostruct/aerodynamics/eval_mtx.py              (EvalVelMtx, Biot-Savart AIC)
+  openaerostruct/aerodynamics/mtx_rhs.py               (VLMMtxRHSComp)
+  openaerostruct/aerodynamics/solve_matrix.py          (SolveMatrix -- a single
+                                                          direct linear solve,
+                                                          not iterative)
+  openaerostruct/aerodynamics/horseshoe_circulations.py
+  openaerostruct/aerodynamics/eval_velocities.py       (EvalVelocities)
+  openaerostruct/aerodynamics/panel_forces.py          (PanelForces)
+  openaerostruct/aerodynamics/convert_velocity.py      (ConvertVelocity)
+  openaerostruct/aerodynamics/functionals.py           (VLMFunctionals)
+  openaerostruct/aerodynamics/lift_coeff_2D.py, lift_drag.py, coeffs.py,
+    total_lift.py, viscous_drag.py, wave_drag.py (with_wave=False -> CDw=0),
+    total_drag.py
+"""
+import jax.numpy as jnp
+
+_TOL = 1e-10
+
+
+def _compute_finite_vortex(r1, r2, r1_norm=None, r2_norm=None):
+    """Biot-Savart contribution of a finite straight vortex filament from
+    r1 to r2 (both are vectors FROM the filament endpoint TO the field
+    point). Port of ``eval_mtx.py::_compute_finite_vortex``.
+
+    The near-singular (``den`` -> 0, field point on the filament's line)
+    case is guarded by substituting a safe denominator *before* dividing,
+    rather than only gating the final `jnp.where`'s selected value: JAX's
+    `where` still evaluates (and back-propagates through) both branches, so
+    a literal `num / den` in the discarded branch can still produce a NaN
+    gradient -- even though its forward value is never selected -- via
+    `0 * nan/inf = nan` in the reverse pass.
+
+    ``r1_norm``/``r2_norm`` are optional precomputed ``|r1|``/``|r2|``
+    (shape ``(..., 1)``). ``eval_vel_mtx`` calls this on four *overlapping*
+    slices of one array, so it passes the norms in rather than letting every
+    call recompute them -- see the note there. Left as ``None`` (the
+    standalone case) they are computed here as before.
+    """
+    if r1_norm is None:
+        r1_norm = jnp.linalg.norm(r1, axis=-1, keepdims=True)
+    if r2_norm is None:
+        r2_norm = jnp.linalg.norm(r2, axis=-1, keepdims=True)
+    r1_x_r2 = jnp.cross(r1, r2)
+    r1_d_r2 = jnp.sum(r1 * r2, axis=-1, keepdims=True)
+    den = r1_norm * r2_norm + r1_d_r2
+    singular = jnp.abs(den) <= _TOL
+    safe_den = jnp.where(singular, 1.0, den)
+    # Fold the whole scalar factor into one (..., 1) coefficient applied once
+    # to the (..., 3) cross product. Written as `num / (safe_den * 4 * pi)`
+    # with `num = (1/|r1| + 1/|r2|) * r1_x_r2` this costs three divides per
+    # element; as a coefficient it costs one. Same expression, fewer divides.
+    coeff = (1.0 / r1_norm + 1.0 / r2_norm) / (safe_den * (4 * jnp.pi))
+    return jnp.where(singular, 0.0, coeff * r1_x_r2)
+
+
+def _compute_semi_infinite_vortex(u, r, r_norm=None):
+    """Port of ``eval_mtx.py::_compute_semi_infinite_vortex``: trailing leg
+    from the field point along direction ``u`` to infinity. ``r_norm`` is an
+    optional precomputed ``|r|``, as in ``_compute_finite_vortex``."""
+    if r_norm is None:
+        r_norm = jnp.linalg.norm(r, axis=-1, keepdims=True)
+    u_x_r = jnp.cross(u, r)
+    u_d_r = jnp.sum(u * r, axis=-1, keepdims=True)
+    den = r_norm * (r_norm - u_d_r)
+    # `u_x_r / den / 4 / pi` is nine divides per element (three per `/`);
+    # one reciprocal and a multiply is the same value for far less work.
+    return u_x_r * (1.0 / (den * (4 * jnp.pi)))
+
+
+def vlm_geometry(def_mesh, S_ref_type="wetted", symmetry=True):
+    """Port of ``VLMGeometry.compute()``.
+
+    Returns
+    -------
+    b_pts, normals, chords, widths, lengths_spanwise, lengths, S_ref
+    """
+    mesh = def_mesh
+    b_pts = mesh[:-1, :, :] * 0.75 + mesh[1:, :, :] * 0.25
+
+    quarter_chord = 0.25 * mesh[-1] + 0.75 * mesh[0]
+    lengths_spanwise = jnp.linalg.norm(quarter_chord[1:, :] - quarter_chord[:-1, :], axis=1)
+    widths = jnp.linalg.norm(quarter_chord[1:, [1, 2]] - quarter_chord[:-1, [1, 2]], axis=1)
+
+    dx = mesh[1:, :, 0] - mesh[:-1, :, 0]
+    dy = mesh[1:, :, 1] - mesh[:-1, :, 1]
+    dz = mesh[1:, :, 2] - mesh[:-1, :, 2]
+    lengths = jnp.sum(jnp.sqrt(dx**2 + dy**2 + dz**2), axis=0)
+
+    normals_raw = jnp.cross(mesh[:-1, 1:, :] - mesh[1:, :-1, :], mesh[:-1, :-1, :] - mesh[1:, 1:, :], axis=2)
+    norms = jnp.sqrt(jnp.sum(normals_raw**2, axis=2))
+    normals = normals_raw / norms[:, :, None]
+
+    if S_ref_type == "wetted":
+        S_ref = 0.5 * jnp.sum(norms)
+    elif S_ref_type == "projected":
+        proj_mesh = mesh.at[:, :, 2].set(0.0)
+        proj_normals = jnp.cross(
+            proj_mesh[:-1, 1:, :] - proj_mesh[1:, :-1, :], proj_mesh[:-1, :-1, :] - proj_mesh[1:, 1:, :], axis=2
+        )
+        proj_norms = jnp.sqrt(jnp.sum(proj_normals**2, axis=2))
+        S_ref = 0.5 * jnp.sum(proj_norms)
+    else:
+        raise ValueError(f"Unknown S_ref_type {S_ref_type!r}")
+
+    if symmetry:
+        S_ref = S_ref * 2
+
+    chords = jnp.linalg.norm(mesh[0, :, :] - mesh[-1, :, :], axis=1)
+
+    return b_pts, normals, chords, widths, lengths_spanwise, lengths, S_ref
+
+
+def collocation_points(def_mesh):
+    """Port of ``CollocationPoints.compute()``. Returns flattened
+    ``(coll_pts, force_pts, bound_vecs)``, each ``((nx-1)*(ny-1), 3)``."""
+    mesh = def_mesh
+    coll_pts = (
+        0.25 * 0.5 * mesh[:-1, :-1, :]
+        + 0.75 * 0.5 * mesh[1:, :-1, :]
+        + 0.25 * 0.5 * mesh[:-1, 1:, :]
+        + 0.75 * 0.5 * mesh[1:, 1:, :]
+    ).reshape(-1, 3)
+    force_pts = (
+        0.75 * 0.5 * mesh[:-1, :-1, :]
+        + 0.25 * 0.5 * mesh[1:, :-1, :]
+        + 0.75 * 0.5 * mesh[:-1, 1:, :]
+        + 0.25 * 0.5 * mesh[1:, 1:, :]
+    ).reshape(-1, 3)
+    bound_vecs = (
+        0.75 * mesh[:-1, :-1, :] + 0.25 * mesh[1:, :-1, :] - 0.75 * mesh[:-1, 1:, :] - 0.25 * mesh[1:, 1:, :]
+    ).reshape(-1, 3)
+    return coll_pts, force_pts, bound_vecs
+
+
+def left_wing_from_mesh(mesh0):
+    """Determine mirroring convention once from the (fixed) base mesh, as
+    ``VortexMesh``/``EvalVelMtx`` do at trace time. This depends only on
+    which spanwise index is closer to the tip vs. the symmetry plane -- a
+    topological property of the mesh that twist does not change -- so it is
+    safe to resolve with plain Python/numpy on the static base mesh rather
+    than inside the traced JAX graph."""
+    import numpy as np
+
+    return bool(np.abs(mesh0[0, 0, 1]) > np.abs(mesh0[0, -1, 1]))
+
+
+def compute_vortex_mesh(def_mesh, left_wing, symmetry=True):
+    """Port of ``VortexMesh.compute()`` (symmetry=True, no ground effect)."""
+    if symmetry:
+        if left_wing:
+            mirrored = def_mesh[:, :-1, :][:, ::-1, :] * jnp.array([1.0, -1.0, 1.0])
+            full = jnp.concatenate([def_mesh, mirrored], axis=1)
+        else:
+            mirrored = def_mesh[:, 1:, :][:, ::-1, :] * jnp.array([1.0, -1.0, 1.0])
+            full = jnp.concatenate([mirrored, def_mesh], axis=1)
+    else:
+        full = def_mesh
+
+    vmesh = jnp.zeros_like(full)
+    vmesh = vmesh.at[:-1, :, :].set(0.75 * full[:-1, :, :] + 0.25 * full[1:, :, :])
+    vmesh = vmesh.at[-1, :, :].set(full[-1, :, :])
+    return vmesh
+
+
+def get_vectors(vortex_mesh, eval_pts):
+    """Port of ``GetVectors.compute()`` (symmetry, no ground effect branch):
+    vector from every vortex-mesh node to every evaluation point."""
+    return eval_pts[:, None, None, :] - vortex_mesh[None, :, :, :]
+
+
+def eval_vel_mtx(vectors, alpha_deg, ny, symmetry=True, right_wing=False):
+    """Port of ``EvalVelMtx.compute()``: assembles the AIC (unit-circulation
+    induced-velocity) matrix from vortex rings, folded for symmetry, with the
+    trailing-edge row corrected into true horseshoes (finite bound + two
+    semi-infinite trailing legs). No ground effect (single pass, vortex
+    multiplier 1.0).
+
+    Parameters
+    ----------
+    vectors : (num_eval, nx, ny_full, 3)
+        From ``get_vectors``, using the vortex mesh (``ny_full = 2*ny-1``
+        when ``symmetry=True``).
+    ny : int
+        Number of spanwise nodes in the *half-wing* mesh (not the mirrored
+        vortex mesh).
+
+    Returns
+    -------
+    (num_eval, nx-1, ny-1, 3) array, units 1/m.
+    """
+    cosa = jnp.cos(alpha_deg * jnp.pi / 180.0)
+    sina = jnp.sin(alpha_deg * jnp.pi / 180.0)
+    u_dir = jnp.stack([cosa, jnp.zeros_like(cosa), sina])
+
+    # |r| for every vortex-mesh-node -> eval-point vector, computed ONCE on the
+    # whole array. vert_A..vert_D below are four overlapping slices of
+    # `vectors`, and each ring leg needs the norm at both of its endpoints, so
+    # every vertex's norm is needed twice; letting each _compute_finite_vortex
+    # call compute its own would evaluate eight slice-sized norms (with their
+    # square roots) where one array-sized norm covers all of them.
+    norms = jnp.linalg.norm(vectors, axis=-1, keepdims=True)
+
+    vert_A, norm_A = vectors[:, 0:-1, 1:, :], norms[:, 0:-1, 1:, :]
+    vert_B, norm_B = vectors[:, 0:-1, 0:-1, :], norms[:, 0:-1, 0:-1, :]
+    vert_C, norm_C = vectors[:, 1:, 0:-1, :], norms[:, 1:, 0:-1, :]
+    vert_D, norm_D = vectors[:, 1:, 1:, :], norms[:, 1:, 1:, :]
+
+    # kept separately: the trailing-edge correction below reuses its last row
+    rear = _compute_finite_vortex(vert_C, vert_D, norm_C, norm_D)
+
+    result = (
+        _compute_finite_vortex(vert_A, vert_B, norm_A, norm_B)  # front (bound, quarter-chord)
+        + _compute_finite_vortex(vert_B, vert_C, norm_B, norm_C)  # right trailing leg (near-field)
+        + rear  # rear (TE-closing artifact; cancelled below)
+        + _compute_finite_vortex(vert_D, vert_A, norm_D, norm_A)  # left trailing leg (near-field)
+    )
+
+    if symmetry:
+        vel_mtx = result[:, :, : ny - 1, :] + result[:, :, ny - 1 :, :][:, :, ::-1, :]
+    else:
+        vel_mtx = result
+
+    vert_D_last = vert_D[:, -1:, :, :]
+    vert_C_last = vert_C[:, -1:, :, :]
+    u = jnp.broadcast_to(u_dir, vert_D_last.shape)
+
+    # Swapping a filament's endpoints negates its cross product and leaves
+    # `den` (symmetric in r1, r2) alone, singular guard included, so
+    # _compute_finite_vortex(D, C) == -_compute_finite_vortex(C, D) exactly.
+    # The bound leg of the trailing-edge horseshoe is therefore just the ring's
+    # already-computed "rear" term on the last chordwise row, negated -- no
+    # need to evaluate that filament a second time.
+    lr1 = -rear[:, -1:, :, :]  # cancels the "rear" artifact above
+    lr2 = _compute_semi_infinite_vortex(u, vert_D_last, norm_D[:, -1:, :, :])
+    lr3 = _compute_semi_infinite_vortex(u, vert_C_last, norm_C[:, -1:, :, :])
+
+    if symmetry:
+        res1 = lr1[:, :, : ny - 1, :] + lr1[:, :, ny - 1 :, :][:, :, ::-1, :]
+        res2 = lr2[:, :, : ny - 1, :] + lr2[:, :, ny - 1 :, :][:, :, ::-1, :]
+        res3 = lr3[:, :, : ny - 1, :] + lr3[:, :, ny - 1 :, :][:, :, ::-1, :]
+        last_row = res1 - res2 + res3
+    else:
+        last_row = lr1 - lr2 + lr3
+
+    vel_mtx = vel_mtx.at[:, -1:, :, :].add(last_row)
+
+    if symmetry and right_wing:
+        vel_mtx = vel_mtx[:, :, ::-1, :]
+
+    return vel_mtx
+
+
+def build_mtx_rhs(vel_mtx_coll, normals, freestream_velocities):
+    """Port of ``VLMMtxRHSComp.compute()`` (single surface).
+
+    ``mtx[i, j]`` = velocity induced at collocation point ``i`` by panel
+    ``j``'s unit circulation, dotted with the normal AT COLLOCATION POINT
+    ``i`` (i.e. panel ``i``'s own normal, since collocation point i sits on
+    panel i) -- NOT panel j's normal. Source: ``np.einsum("ijk,ik->ij",
+    mtx_n_n_3, normals_n_3)`` -- both operands indexed by ``i``, not ``j``.
+    """
+    system_size = vel_mtx_coll.shape[0]
+    vel_flat = vel_mtx_coll.reshape(system_size, -1, 3)
+    normals_flat = normals.reshape(-1, 3)
+    mtx = jnp.einsum("ijk,ik->ij", vel_flat, normals_flat)
+    rhs = -jnp.sum(freestream_velocities * normals_flat, axis=-1)
+    return mtx, rhs
+
+
+def solve_circulations(mtx, rhs):
+    """Port of ``SolveMatrix``: a single direct linear solve (the source uses
+    dense LU via ``scipy.linalg.lu_factor``/``lu_solve``; this is exactly
+    ``mtx^-1 @ rhs``, not iterative)."""
+    return jnp.linalg.solve(mtx, rhs)
+
+
+def compute_horseshoe_circulations(circulations, nx, ny):
+    """Port of ``HorseshoeCirculations``: chordwise-adjacent ring circulation
+    differencing (identity for ``nx-1==1``, i.e. a single chordwise panel)."""
+    arr = circulations.reshape(nx - 1, ny - 1)
+    horseshoe = arr.at[1:, :].add(-arr[:-1, :])
+    return horseshoe.reshape(-1)
+
+
+def eval_velocities(freestream_velocities, circulations, vel_mtx_force):
+    """Port of ``EvalVelocities.compute()``: total velocity (freestream +
+    induced) at the force points, using the ring ``circulations`` (not the
+    horseshoe ones)."""
+    num_eval = vel_mtx_force.shape[0]
+    vel_flat = vel_mtx_force.reshape(num_eval, -1, 3)
+    return freestream_velocities + jnp.einsum("ijk,j->ik", vel_flat, circulations)
+
+
+def compute_panel_forces(rho, horseshoe_circulations, force_pts_velocities, bound_vecs):
+    """Port of ``PanelForces.compute()``: Kutta-Joukowski, ``F = rho * Gamma *
+    (V x l_bound)``."""
+    return rho * horseshoe_circulations[:, None] * jnp.cross(force_pts_velocities, bound_vecs)
+
+
+def convert_velocity(v, alpha_deg, beta_deg, system_size):
+    """Port of ``ConvertVelocity.compute()`` (non-rotational)."""
+    alpha = alpha_deg * jnp.pi / 180.0
+    beta = beta_deg * jnp.pi / 180.0
+    cosa, sina = jnp.cos(alpha), jnp.sin(alpha)
+    cosb, sinb = jnp.cos(beta), jnp.sin(beta)
+    v_inf = v * jnp.stack([cosa * cosb, -sinb, sina * cosb])
+    return jnp.broadcast_to(v_inf, (system_size, 3))
+
+
+# ---------------------------------------------------------------------------
+# VLM functionals: sec_forces -> Cl, L, D, CL1, CDi, CL, CDv, CDw, CD
+# ---------------------------------------------------------------------------
+
+
+def lift_coeff_2d(sec_forces, alpha_deg, widths, chords, v, rho):
+    """Port of ``LiftCoeff2D.compute()``: spanwise sectional lift coefficient."""
+    alpha = alpha_deg * jnp.pi / 180.0
+    cosa, sina = jnp.cos(alpha), jnp.sin(alpha)
+    forces = jnp.sum(sec_forces, axis=0)  # sum over chordwise axis, (ny-1,3)
+    lift_dist = (-forces[:, 0] * sina + forces[:, 2] * cosa) / widths
+    chord = 0.5 * (chords[1:] + chords[:-1])
+    return lift_dist / (0.5 * rho * v**2 * chord)
+
+
+def lift_drag(sec_forces, alpha_deg, beta_deg, symmetry=True):
+    """Port of ``LiftDrag.compute()``: total dimensional lift/drag."""
+    alpha = alpha_deg * jnp.pi / 180.0
+    beta = beta_deg * jnp.pi / 180.0
+    cosa, sina = jnp.cos(alpha), jnp.sin(alpha)
+    cosb, sinb = jnp.cos(beta), jnp.sin(beta)
+    forces = sec_forces.reshape(-1, 3)
+
+    L = jnp.sum(-forces[:, 0] * sina + forces[:, 2] * cosa)
+    D = jnp.sum(forces[:, 0] * cosa * cosb - forces[:, 1] * sinb + forces[:, 2] * sina * cosb)
+
+    if symmetry:
+        L = L * 2.0
+        D = D * 2.0
+    return L, D
+
+
+def aero_coeffs(S_ref, L, D, v, rho):
+    """Port of ``Coeffs.compute()``."""
+    q = 0.5 * rho * v**2 * S_ref
+    return L / q, D / q  # CL1, CDi
+
+
+def total_lift(CL1, CL0=0.0):
+    """Port of ``TotalLift.compute()``."""
+    return CL1 + CL0
+
+
+def viscous_drag(re, mach, S_ref, widths, lengths_spanwise, lengths, t_over_c, k_lam, c_max_t, with_viscous=True, symmetry=True):
+    """Port of ``ViscousDrag.compute()`` (``with_viscous`` branch)."""
+    if not with_viscous:
+        return 0.0
+
+    cos_sweep = widths / lengths_spanwise
+    chords = (lengths[1:] + lengths[:-1]) / 2.0
+    Re_c = re * chords
+
+    cdturb_total = 0.455 / (jnp.log10(Re_c)) ** 2.58 / (1.0 + 0.144 * mach**2) ** 0.65
+
+    if k_lam == 0:
+        cdlam_tr = 0.0
+        cdturb_tr = 0.0
+    elif k_lam < 1.0:
+        cdlam_tr = 1.328 / jnp.sqrt(Re_c * k_lam)
+        cdturb_tr = 0.455 / (jnp.log10(Re_c * k_lam)) ** 2.58 / (1.0 + 0.144 * mach**2) ** 0.65
+    else:
+        cdlam_tr = 1.328 / jnp.sqrt(Re_c * k_lam)
+        cdturb_total = 0.0
+        cdturb_tr = 0.0
+
+    cd = (cdlam_tr - cdturb_tr) * k_lam + cdturb_total
+    d_over_q = 2 * cd * chords
+
+    k_FF = 1.34 * mach**0.18 * (1.0 + 0.6 * t_over_c / c_max_t + 100 * t_over_c**4)
+    FF = k_FF * cos_sweep**0.28
+
+    D_over_q = jnp.sum(d_over_q * widths * FF)
+    CDv = D_over_q / S_ref
+    if symmetry:
+        CDv = CDv * 2
+    return CDv
+
+
+def total_drag(CDi, CDv, CDw, CD0):
+    """Port of ``TotalDrag.compute()``."""
+    return CDi + CDv + CDw + CD0
+
+
+# ---------------------------------------------------------------------------
+# Aero -> structure load transfer (not an OpenAeroStruct port -- generic
+# glue for coupling this package's panel forces to an external structural
+# model that has one node per spanwise VLM station, e.g. a beam/spar mesh).
+# ---------------------------------------------------------------------------
+
+
+def sectional_forces(sec_forces):
+    """Sum panel forces over the chordwise axis: an ``(nx-1, ny-1, 3)`` panel
+    lattice -> one net force per spanwise strip, ``(ny-1, 3)``. Use this
+    before coupling to a structural model with a single node per spanwise
+    station (one beam/shell element per strip) regardless of how many
+    chordwise VLM panels were used to resolve that strip's loading."""
+    return jnp.sum(sec_forces, axis=0)
+
+
+def lump_to_nodes(strip_forces):
+    """``(ny-1, 3)`` sectional (per spanwise-strip) forces -> ``(ny, 3)``
+    nodal forces, via the standard half-to-each-endpoint lumping (exactly
+    conserves total force: ``sum(nodal) == sum(strip_forces)``). Strip ``i``
+    sits between nodes ``i`` and ``i + 1``, matching a structural mesh whose
+    element ``i`` connects those same two nodes (e.g. a beam model built
+    with ``[[i, i + 1] for i in range(n)]`` connectivity)."""
+    n_nodes = strip_forces.shape[0] + 1
+    nodal = jnp.zeros((n_nodes, 3))
+    nodal = nodal.at[:-1].add(0.5 * strip_forces).at[1:].add(0.5 * strip_forces)
+    return nodal

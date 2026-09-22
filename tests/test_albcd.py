@@ -77,7 +77,7 @@ def test_verbose_output(capsys):
     opt = make_solver(opt_tol=[1e-2, 1e-10], verbose=True)
     opt.solve()
     lines = capsys.readouterr().out.splitlines()
-    n = len(opt.feas_history)  # outer iterations performed
+    n = sum(1 for line in lines if line.startswith("outer") and "| feas " in line)  # outer iterations performed
     assert "Phase 1 complete, starting phase 2" in lines
     assert lines[-2].startswith(f"outer {n:3d} | feas ")
     assert lines[-1].startswith(f"Converged after {n} outer iterations")
@@ -90,9 +90,17 @@ def test_history():
     np.testing.assert_array_equal(opt.history[-1], opt.x)
     assert (len(opt.history) - 1) % 2 == 0  # one entry per subproblem solve
 
+    # feasibility and optimality are recorded per subproblem solve too, so both line
+    # up with history once its leading x0 is dropped
+    assert len(opt.feas_history) == len(opt.opt_history) == len(opt.history) - 1
+    np.testing.assert_allclose(opt.feas_history[-1], np.max(np.abs(opt.phi)))
+    assert opt.opt_history[-1] <= opt.opt_tol[-1]  # the inner loop stops on this value
+    assert np.isnan(opt.opt_history[0])  # undefined until every block has solved once
+    assert np.all(np.isfinite(opt.opt_history[1:]))
+
     opt = make_solver(save=False)
     opt.solve()
-    assert opt.history == [] and opt.feas_history == []
+    assert opt.history == [] and opt.feas_history == [] and opt.opt_history == []
 
 
 def test_data_exchange():

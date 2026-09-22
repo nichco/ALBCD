@@ -179,7 +179,7 @@ ax[0].grid(color="lavender", alpha=0.5, axis="y")
 
 ax[1].semilogy(opt.feas_history, linewidth=2, color="tab:orange")
 ax[1].axhline(opt.feas_tol, color="gray", linewidth=1, linestyle="--", alpha=0.8)
-ax[1].set_xlabel("Outer iteration")
+ax[1].set_xlabel("Subproblem solve")
 ax[1].set_ylabel("Feasibility")
 ax[1].grid(color="lavender", alpha=0.5, axis="y")
 

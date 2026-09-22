@@ -1,6 +1,7 @@
 # Aerostructural wing design
 
-A larger ALBCD example, in PyTorch only. It minimizes the drag of a tapered wing
+A larger ALBCD example, in PyTorch; the same problem in JAX is in
+[../../jax/aerostruct/](../../jax/aerostruct/README.md). It minimizes the drag of a tapered wing
 over its twist, subject to lift = weight, while sizing the wall thickness of its
 tubular spar so that both wing tips deflect by 0.1 m. The aerodynamics and the
 structure are the two ALBCD blocks, coupled through copies of the aero loads and

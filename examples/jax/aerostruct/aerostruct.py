@@ -9,15 +9,17 @@ two disciplines are the two blocks, coupled through copies of each other's outpu
     StructSubproblem  owns [thickness_cp, aero_loads_copy]  local constraints: tip displacements = target
 
 The coupling constraints phi force the copies to equal the actual aero loads and
-weight. Gradients come from PyTorch. Run this file to solve the problem, compare
+weight. Gradients come from JAX. Run this file to solve the problem, compare
 the result with the monolithic solution in monolithic_solution.npz (regenerate it
 with monolithic.py), and plot the convergence.
 """
 
 import os
+from collections import namedtuple
 import numpy as np
-import torch
-torch.set_default_dtype(torch.float64)  # modopt and the models work in float64
+import jax
+jax.config.update("jax_enable_x64", True)  # modopt and the models work in float64
+import jax.numpy as jnp
 import modopt as mo
 import matplotlib.pyplot as plt
 from albcd import ALBCD, Subproblem
@@ -48,20 +50,39 @@ w_scale = 1e-4
 
 
 def coupling(aero_loads, aero_loads_copy, weight, weight_copy):
-    return torch.cat([f_scale * (aero_loads - aero_loads_copy),
-                      w_scale * (weight - weight_copy).reshape(1)])
+    return jnp.concatenate([f_scale * (aero_loads - aero_loads_copy),
+                            w_scale * jnp.reshape(weight - weight_copy, 1)])
 
 
-def solve_slsqp(obj, con, v0, x_scaler, c_scaler, ftol, xl=None, xu=None):
-    """Minimize obj(v) s.t. con(v) = 0 and xl <= v <= xu with modopt's SLSQP, using PyTorch derivatives.
+# a subproblem's objective, its gradient, its local constraints and their Jacobian, each jitted
+Compiled = namedtuple("Compiled", "obj grad con jac")
+
+
+def compile_subproblem(objective, local_constraints):
+    """Jit objective(v, *args), its gradient in v, local_constraints(v) and their Jacobian.
+
+    Each subproblem does this once, in setup(). The inputs that change between solves
+    (other, y, mu, ...) are arguments of the compiled functions rather than constants in a
+    closure, so every solve reuses the same compiled code. Wrapping a new closure in
+    mo.JaxProblem for each solve would instead retrace and recompile the VLM and beam
+    models every time, at about a second per function.
+    """
+    return Compiled(jax.jit(objective), jax.jit(jax.grad(objective)),
+                    jax.jit(local_constraints), jax.jit(jax.jacrev(local_constraints)))
+
+
+def solve_slsqp(fns, args, v0, x_scaler, c_scaler, ftol, xl=None, xu=None):
+    """Minimize fns.obj(v, *args) s.t. fns.con(v) = 0 and xl <= v <= xu with modopt's SLSQP.
 
     Returns the solution, SLSQP's constraint multipliers and the constraint Jacobian at the solution.
     """
+    # modopt passes numpy arrays; convert them so the compiled functions always see JAX
+    # arrays, as they do in residual(). jax.jit compiles numpy and JAX arguments separately.
     prob = mo.ProblemLite(x0=v0,
-                          obj=lambda v: np.float64(obj(torch.as_tensor(v))),
-                          grad=lambda v: np.array(torch.func.grad(obj)(torch.as_tensor(v))),
-                          con=lambda v: np.array(con(torch.as_tensor(v))),
-                          jac=lambda v: np.array(torch.func.jacrev(con)(torch.as_tensor(v))),
+                          obj=lambda v: np.float64(fns.obj(jnp.asarray(v), *args)),
+                          grad=lambda v: np.array(fns.grad(jnp.asarray(v), *args)),
+                          con=lambda v: np.array(fns.con(jnp.asarray(v))),
+                          jac=lambda v: np.array(fns.jac(jnp.asarray(v))),
                           xl=xl, xu=xu, x_scaler=x_scaler, cl=0, cu=0, c_scaler=c_scaler)
     optimizer = mo.SLSQP(prob, solver_options={'maxiter': 1000, 'ftol': ftol}, turn_off_outputs=True)
     optimizer.solve()
@@ -69,7 +90,7 @@ def solve_slsqp(obj, con, v0, x_scaler, c_scaler, ftol, xl=None, xu=None):
     # SLSQP solves in c_scaler-scaled constraint space, so its multipliers are
     # rescaled to the unscaled constraints used in the residual() methods below
     multipliers = np.asarray(optimizer.results['multipliers']) * c_scaler
-    jac = np.atleast_2d(np.array(torch.func.jacrev(con)(torch.as_tensor(v))))
+    jac = np.atleast_2d(np.array(fns.jac(jnp.asarray(v))))
     return v, multipliers, jac
 
 
@@ -89,6 +110,7 @@ class AeroSubproblem(Subproblem):
         self.add_output("phi") # coupling constraints at the new x
         self.add_output("aero_loads")  # to StructSubproblem
         self.add_output("CD")
+        self._fns = compile_subproblem(self.objective, self.local_constraints)
 
     def objective(self, v, other, y, mu, weight):
         twist_cp, weight_copy = v[:num_cp_twist], v[num_cp_twist]
@@ -97,35 +119,34 @@ class AeroSubproblem(Subproblem):
         CD, aero_loads, _ = aero_model(twist_cp)
         c = coupling(aero_loads, aero_loads_copy, weight, weight_copy)
 
-        return 1e2 * CD + torch.sum(y * c) + 0.5 * torch.sum(mu * c**2)
+        return 1e2 * CD + jnp.sum(y * c) + 0.5 * jnp.sum(mu * c**2)
 
     def local_constraints(self, v):
         _, _, lift = aero_model(v[:num_cp_twist])
-        return (lift - v[num_cp_twist]).reshape(1)
+        return jnp.reshape(lift - v[num_cp_twist], 1)
 
     def solve(self, inputs, outputs) -> None:
         x = inputs["x"]
-        other, y, mu, weight = (torch.as_tensor(a) for a in (self.other(x), inputs["y"], inputs["mu"], inputs["weight"]))
+        other, y, mu, weight = (jnp.asarray(a) for a in (self.other(x), inputs["y"], inputs["mu"], inputs["weight"]))
 
         v_new, self._multipliers, self._jac_con = solve_slsqp(
-            lambda v: self.objective(v, other, y, mu, weight), self.local_constraints,
+            self._fns, (other, y, mu, weight),
             np.array(self.decompose(x)), self.X_SCALER, self.C_SCALER, self.FTOL)
 
         x_new = self.recompose(x, v_new)
-        CD, aero_loads, _ = aero_model(torch.as_tensor(v_new[:num_cp_twist]))
+        CD, aero_loads, _ = aero_model(v_new[:num_cp_twist])
 
         outputs["x"] = x_new
         outputs["aero_loads"] = np.array(aero_loads)
         outputs["CD"] = float(CD)
         # StructSubproblem's variables, and so its weight, are unchanged by this solve
-        outputs["phi"] = np.array(coupling(aero_loads, torch.as_tensor(x_new[LOADS_SLICE]),
-                                           weight, torch.as_tensor(x_new[WEIGHT_SLICE][0])))
+        outputs["phi"] = np.array(coupling(aero_loads, x_new[LOADS_SLICE], weight, x_new[WEIGHT_SLICE][0]))
 
     def residual(self, inputs) -> float:
         x = inputs["x"]
-        v, other, y, mu, weight = (torch.as_tensor(a) for a in (self.decompose(x), self.other(x),
-                                                                  inputs["y"], inputs["mu"], inputs["weight"]))
-        grad_f = np.array(torch.func.grad(self.objective)(v, other, y, mu, weight))
+        v, other, y, mu, weight = (jnp.asarray(a) for a in (self.decompose(x), self.other(x),
+                                                               inputs["y"], inputs["mu"], inputs["weight"]))
+        grad_f = np.array(self._fns.grad(v, other, y, mu, weight))
 
         # KKT stationarity with SLSQP's multipliers for the local constraint
         resid = grad_f - self._jac_con.T @ self._multipliers
@@ -158,6 +179,7 @@ class StructSubproblem(Subproblem):
         self.add_output("x")
         self.add_output("phi") # coupling constraints at the new x
         self.add_output("weight")  # to AeroSubproblem
+        self._fns = compile_subproblem(self.objective, self.local_constraints)
 
     def objective(self, v, other, y, mu, aero_loads):
         thickness_cp, aero_loads_copy = v[:num_cp_thickness], v[num_cp_thickness:]
@@ -167,36 +189,35 @@ class StructSubproblem(Subproblem):
         c = coupling(aero_loads, aero_loads_copy, weight, weight_copy)
 
         # the drag term of the augmented Lagrangian is constant in this block, so it is left out
-        return torch.sum(y * c) + 0.5 * torch.sum(mu * c**2)
+        return jnp.sum(y * c) + 0.5 * jnp.sum(mu * c**2)
 
     def local_constraints(self, v):
         u_r, u_l, _ = structures_model(v[num_cp_thickness:], v[:num_cp_thickness])
-        return torch.stack([u_r - tip_disp_target,
-                            u_l - tip_disp_target])
+        return jnp.stack([u_r - tip_disp_target,
+                          u_l - tip_disp_target])
 
     def solve(self, inputs, outputs) -> None:
         x = inputs["x"]
-        other, y, mu, aero_loads = (torch.as_tensor(a) for a in (self.other(x), inputs["y"], inputs["mu"], inputs["aero_loads"]))
+        other, y, mu, aero_loads = (jnp.asarray(a) for a in (self.other(x), inputs["y"], inputs["mu"], inputs["aero_loads"]))
 
         v_new, self._multipliers, self._jac_con = solve_slsqp(
-            lambda v: self.objective(v, other, y, mu, aero_loads), self.local_constraints,
+            self._fns, (other, y, mu, aero_loads),
             np.array(self.decompose(x)), self.X_SCALER, self.C_SCALER, self.FTOL, xl=self.XL, xu=self.XU)
 
         x_new = self.recompose(x, v_new)
-        aero_loads_copy = torch.as_tensor(v_new[num_cp_thickness:])
-        _, _, weight = structures_model(aero_loads_copy, torch.as_tensor(v_new[:num_cp_thickness]))
+        aero_loads_copy = v_new[num_cp_thickness:]
+        _, _, weight = structures_model(aero_loads_copy, v_new[:num_cp_thickness])
 
         outputs["x"] = x_new
         outputs["weight"] = float(weight)
         # AeroSubproblem's variables, and so its aero loads, are unchanged by this solve
-        outputs["phi"] = np.array(coupling(aero_loads, aero_loads_copy,
-                                           weight, torch.as_tensor(x_new[WEIGHT_SLICE][0])))
+        outputs["phi"] = np.array(coupling(aero_loads, aero_loads_copy, weight, x_new[WEIGHT_SLICE][0]))
 
     def residual(self, inputs) -> float:
         x = inputs["x"]
-        v, other, y, mu, aero_loads = (torch.as_tensor(a) for a in (self.decompose(x), self.other(x),
-                                                                      inputs["y"], inputs["mu"], inputs["aero_loads"]))
-        grad_f = np.array(torch.func.grad(self.objective)(v, other, y, mu, aero_loads))
+        v, other, y, mu, aero_loads = (jnp.asarray(a) for a in (self.decompose(x), self.other(x),
+                                                                   inputs["y"], inputs["mu"], inputs["aero_loads"]))
+        grad_f = np.array(self._fns.grad(v, other, y, mu, aero_loads))
 
         # KKT stationarity with SLSQP's multipliers for the (equality) tip-displacement constraints
         resid = grad_f - self._jac_con.T @ self._multipliers
@@ -211,8 +232,8 @@ class StructSubproblem(Subproblem):
 
 
 # evaluate both models once at the initial design to initialize the copies and the shared weight
-_, aero_loads_init, _ = aero_model(torch.as_tensor(twist_cp0))
-_, _, weight_init = structures_model(aero_loads_init, torch.as_tensor(thickness_cp0))
+_, aero_loads_init, _ = aero_model(twist_cp0)
+_, _, weight_init = structures_model(aero_loads_init, thickness_cp0)
 
 x0 = np.concatenate([twist_cp0, [float(weight_init)], thickness_cp0, np.array(aero_loads_init)])
 
@@ -235,8 +256,8 @@ twist_cp = opt.x[TWIST_SLICE]
 thickness_cp = opt.x[THICKNESS_SLICE]
 aero_loads_copy = opt.x[LOADS_SLICE]
 
-_, _, lift = aero_model(torch.as_tensor(twist_cp))
-u_r, u_l, weight = structures_model(torch.as_tensor(aero_loads_copy), torch.as_tensor(thickness_cp))
+_, _, lift = aero_model(twist_cp)
+u_r, u_l, weight = structures_model(aero_loads_copy, thickness_cp)
 print('Tip displacements (m): ', float(u_r), float(u_l))
 print('Lift (N): ', float(lift), '  Weight (N): ', float(weight))
 
@@ -251,8 +272,8 @@ print('CD (monolithic): ', float(solution['CD']))
 print('Relative error: ', error[-1])
 
 
-twist = np.array(bspline_twist @ torch.as_tensor(twist_cp))
-thickness = np.array(bspline_thickness @ torch.as_tensor(thickness_cp))
+twist = np.array(bspline_twist @ twist_cp)
+thickness = np.array(bspline_thickness @ thickness_cp)
 
 fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 3))
 ax1.plot(y, np.degrees(twist))

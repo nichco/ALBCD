@@ -54,7 +54,10 @@ class ALBCD():
     max_y : float
         Bound on the magnitude of each Lagrange multiplier.
     save : bool
-        Record ``history`` and ``feas_history``.
+        Record ``history``, ``feas_history`` and ``opt_history``. Recording the
+        optimality costs one extra ``residual()`` call per block per subproblem
+        solve; with ``save=False`` it is only computed once per sweep, which is
+        all the convergence test needs.
     verbose : bool
         Print per-iteration diagnostics.
 
@@ -71,7 +74,13 @@ class ALBCD():
     history : list of ndarray
         ``x0`` followed by ``x`` after every subproblem solve.
     feas_history : list of float
-        ``max|phi|`` at the end of each outer iteration.
+        ``max|phi|`` after every subproblem solve.
+    opt_history : list of float
+        Max-norm KKT stationarity residual over all blocks after every
+        subproblem solve; ``nan`` until every block has solved once, since
+        ``residual()`` may need data a block caches when it solves. Aligned with
+        ``feas_history``, and with ``history`` offset by the leading ``x0``:
+        entry ``i`` of both describes ``history[i + 1]``.
     tf : float
         Wall-clock time of :meth:`solve` in seconds.
     """
@@ -129,7 +138,8 @@ class ALBCD():
         self.save = save
         self.verbose = verbose
         self.history = [self.x.copy()] if self.save else []
-        self.feas_history = [] # feasibility (max constraint violation) at each outer iteration
+        self.feas_history = [] # feasibility (max constraint violation) after each subproblem solve
+        self.opt_history = []  # optimality (max-norm KKT residual) after each subproblem solve
         self.y = np.zeros_like(self.mu) # Lagrange multipliers, one per coupling constraint
         self.phi = None # coupling constraints at the current x, from the latest subproblem solve
         self.success = False # set by solve()
@@ -180,6 +190,17 @@ class ALBCD():
         return None
 
 
+    def _optimality(self) -> float:
+        """Max-norm KKT stationarity residual over all subproblem blocks at the current x."""
+        # refresh every subproblem's inputs to the current state before checking
+        # optimality -- a subproblem's own inputs may be stale relative to blocks
+        # that moved after it
+        for subproblem in self.subproblems:
+            self._set_inputs(subproblem)
+
+        return max(subproblem.residual(subproblem.inputs) for subproblem in self.subproblems)
+
+
     def solve(self) -> None:
         """Run ALBCD; the results are stored in the attributes ``x``, ``y``, ``mu``, ``phi``, ``data`` and ``success``."""
 
@@ -196,6 +217,7 @@ class ALBCD():
         # resumes where the previous one stopped and max_outer_iter bounds the whole solve
         outer_iters = iter(range(1, self.max_outer_iter + 1))
         k = 0 # outer iterations completed
+        all_blocks_solved = False # every block has solved once, so _optimality() can be evaluated
 
         # tolerance phases: each phase runs outer iterations with its own inner loop
         # optimality tolerance until feasibility reaches feas_tol, then moves on to the next
@@ -208,7 +230,7 @@ class ALBCD():
                 # BCD inner loop (sweeps counted from 1)
                 for j in range(1, self.max_inner_iter + 1):
 
-                    for subproblem in self.subproblems:
+                    for i, subproblem in enumerate(self.subproblems):
 
                         self._set_inputs(subproblem)
                         subproblem.outputs["phi"] = None # cleared so a solve() that doesn't set phi is caught
@@ -217,15 +239,17 @@ class ALBCD():
 
                         if self.save:
                             self.history.append(self.x.copy())
+                            self.feas_history.append(float(np.max(np.abs(self.phi))))
+                            # residual() may need data a block caches when it solves, so the
+                            # optimality is undefined until every block has solved once
+                            ready = all_blocks_solved or i == len(self.subproblems) - 1
+                            self.opt_history.append(self._optimality() if ready else np.nan)
 
-                    # refresh every subproblem's inputs to the post-sweep state before
-                    # checking optimality -- a subproblem's own inputs may be stale
-                    # relative to blocks that moved later in this sweep
-                    for subproblem in self.subproblems:
-                        self._set_inputs(subproblem)
+                    all_blocks_solved = True
 
-                    # max-norm KKT stationarity residual over all subproblem blocks
-                    opt_res = max(subproblem.residual(subproblem.inputs) for subproblem in self.subproblems)
+                    # max-norm KKT stationarity residual over all subproblem blocks, at the
+                    # end of the sweep -- the last value recorded above, when saving
+                    opt_res = self.opt_history[-1] if self.save else self._optimality()
 
                     if self.verbose:
                         print(f'outer {k:3d} | sweep {j:3d} | opt_res {opt_res:.3e}')
@@ -237,8 +261,6 @@ class ALBCD():
                 # the last subproblem solved in the sweep evaluated phi at the current x
                 c_new = self.phi
                 feas = np.max(np.abs(c_new))
-                if self.save:
-                    self.feas_history.append(feas)
 
                 if self.verbose:
                     print(f'outer {k:3d} | feas {feas:.3e} | max mu {np.max(self.mu):.3e} | |y| {np.linalg.norm(self.y):.3e}')

@@ -11,6 +11,7 @@ pip install -e ".[examples]"
 
 and run any example directly, e.g. `python examples/pytorch/rosenbrock_consensus.py`.
 
-Two larger wing design examples, in PyTorch only, are in
-[pytorch/aerostruct/](pytorch/aerostruct/README.md) (aerostructural design) and
-[pytorch/uCRM/](pytorch/uCRM/README.md) (multipoint design).
+Two larger wing design examples are in
+[jax/aerostruct/](jax/aerostruct/README.md) and [pytorch/aerostruct/](pytorch/aerostruct/README.md)
+(aerostructural design) and, in PyTorch only, [pytorch/uCRM/](pytorch/uCRM/README.md)
+(multipoint design).
