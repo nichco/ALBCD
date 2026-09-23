@@ -27,7 +27,8 @@ class Subproblem:
     def setup(self) -> None:
         """Declare inputs and outputs with :meth:`add_input` and :meth:`add_output`.
 
-        Outputs ``"x"`` and ``"phi"`` are required.
+        Outputs ``"x"`` and ``"phi"`` are required, except that an unconstrained
+        problem (``ALBCD(..., unconstrained=True)``) has no ``"phi"``.
         """
         raise NotImplementedError
 
@@ -36,7 +37,9 @@ class Subproblem:
 
         Must set ``outputs["x"]``, the global design vector with this block's
         entries updated (see :meth:`recompose`), and ``outputs["phi"]``, the
-        coupling constraints evaluated at that same ``x``.
+        coupling constraints evaluated at that same ``x``. For an unconstrained
+        problem the augmented Lagrangian is just the objective, and there is
+        no ``phi``.
         """
         raise NotImplementedError
 

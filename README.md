@@ -144,6 +144,20 @@ opt.solve()
 print(opt.success, opt.x)  # True, approximately [0.354 0. 0.354]: x1 = x2 = sqrt(2)/4 on the circle, s = 0
 ```
 
+### Unconstrained problems
+
+For a problem without coupling constraints, pass `unconstrained=True` and omit `mu0`.
+The subproblems then declare only the `"x"` output (no `"phi"`), and ALBCD reduces to
+block coordinate descent: it runs up to `max_inner_iter` sweeps until the residual reaches
+the final `opt_tol`, with no augmented Lagrangian outer loop or tolerance phases.
+Constraints local to a single block are still allowed. See
+[examples/powell.py](https://github.com/nichco/ALBCD/blob/main/examples/powell.py) and
+`2d_rosenbrock.py` (JAX and PyTorch).
+
+```python
+opt = ALBCD(subproblems, x0, unconstrained=True, opt_tol=1e-6, max_inner_iter=100)
+```
+
 ## Examples
 
 See [examples/](https://github.com/nichco/ALBCD/tree/main/examples). Every problem below is included twice, once with gradients from JAX and once from PyTorch.
@@ -156,6 +170,9 @@ See [examples/](https://github.com/nichco/ALBCD/tree/main/examples). Every probl
 | `quadratic_consensus_circle.py` | Consensus form: each block owns a full copy of the variables and handles the circle constraint locally, with coupling constraints forcing the copies to agree. |
 | `rosenbrock_consensus.py` | Consensus form of the nonconvex Rosenbrock function. |
 | `proximal_rosenbrock_consensus.py` | Same problem as `rosenbrock_consensus.py`, with a proximal term added to each block's subproblem for stabilization. |
+| `2d_rosenbrock.py` | Unconstrained (`unconstrained=True`) two-dimensional Rosenbrock function with one variable per block: plain block coordinate descent zigzags along the valley to the minimum. |
+
+[powell.py](https://github.com/nichco/ALBCD/blob/main/examples/powell.py) is Powell's unconstrained example (`unconstrained=True`), on which block coordinate descent cycles around six vertices of a cube instead of converging. Each block's minimizer and residual are explicit, so it needs only NumPy and matplotlib.
 
 Two larger examples solve wing design problems and compare against a monolithic (single-solve) reference:
 

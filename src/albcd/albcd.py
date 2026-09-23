@@ -25,15 +25,22 @@ class ALBCD():
     ``|phi_i|`` did not drop below ``tau`` times its previous value. The solve
     stops once ``max|phi| <= feas_tol`` in the final phase.
 
+    With ``unconstrained=True`` there are no coupling constraints: ``y``,
+    ``mu`` and ``phi`` are empty, the augmented Lagrangian is just ``f``, and
+    the solve reduces to the BCD inner loop, i.e. at most ``max_inner_iter``
+    sweeps until every subproblem residual is at most the final ``opt_tol``.
+    Constraints local to one block are still allowed.
+
     Parameters
     ----------
     subproblems : list of Subproblem
         One subproblem per block, solved in list order during each sweep.
     x0 : array_like
         Initial design vector.
-    mu0 : array_like
+    mu0 : array_like, optional
         Initial penalty parameters, one per coupling constraint; sets the
-        length of ``y`` and ``phi``.
+        length of ``y`` and ``phi``. Required unless ``unconstrained=True``,
+        in which case it must be omitted.
     data0 : dict, optional
         Initial values of any extra subproblem inputs/outputs, keyed by name.
     max_mu : float
@@ -47,6 +54,7 @@ class ALBCD():
     opt_tol : float or sequence of float
         Inner loop optimality tolerance for each phase; its length sets the
         number of phases (e.g. a loose tolerance first, then a tight one).
+        With ``unconstrained=True`` only the final tolerance is used.
     max_outer_iter : int
         Maximum number of outer iterations, counted across all phases.
     max_inner_iter : int
@@ -60,21 +68,28 @@ class ALBCD():
         all the convergence test needs.
     verbose : bool
         Print per-iteration diagnostics.
+    unconstrained : bool
+        The problem has no coupling constraints, so ``mu0`` is omitted and no
+        subproblem declares the ``"phi"`` output. Only the BCD inner loop runs;
+        ``max_outer_iter``, ``max_mu``, ``rho``, ``tau``, ``feas_tol`` and
+        ``max_y`` are unused.
 
     Attributes
     ----------
     x, y, mu, phi : ndarray
         Design vector, multipliers, penalty parameters and coupling
-        constraints; the solution once :meth:`solve` returns.
+        constraints; the solution once :meth:`solve` returns. ``y``, ``mu``
+        and ``phi`` are empty when unconstrained.
     success : bool
         True if the solve ended feasible (``max|phi| <= feas_tol``) and
-        optimal (the last inner loop reached the final ``opt_tol``).
+        optimal (the last inner loop reached the final ``opt_tol``); when
+        unconstrained, only optimal.
     data : dict
         Extra inputs/outputs shared between subproblems.
     history : list of ndarray
         ``x0`` followed by ``x`` after every subproblem solve.
     feas_history : list of float
-        ``max|phi|`` after every subproblem solve.
+        ``max|phi|`` after every subproblem solve (0 when unconstrained).
     opt_history : list of float
         Max-norm KKT stationarity residual over all blocks after every
         subproblem solve; ``nan`` until every block has solved once, since
@@ -88,7 +103,7 @@ class ALBCD():
     def __init__(self,
                  subproblems: Sequence,
                  x0: np.ndarray,
-                 mu0: np.ndarray,
+                 mu0: Optional[np.ndarray] = None,
                  data0: Optional[dict] = None,
                  max_mu: float = 1e3,
                  rho: float = 1.2,
@@ -100,6 +115,7 @@ class ALBCD():
                  max_y: float = 1e6,
                  save: bool = True,
                  verbose: bool = True,
+                 unconstrained: bool = False,
                  ):
         """Set up the solver. The parameters are described above."""
 
@@ -107,16 +123,28 @@ class ALBCD():
         self.x = np.array(x0, dtype=float) # copy, so the caller's x0 is never modified
         self.data = {} if data0 is None else dict(data0) # extra inputs/outputs shared between subproblems; never holds x, y, mu or phi
         self.tf = None
+        self.unconstrained = unconstrained
+
+        # mu0 has one entry per coupling constraint, so it's needed exactly when there are some
+        if unconstrained and mu0 is not None:
+            raise ValueError('mu0 must be omitted when unconstrained=True')
+        if not unconstrained and (mu0 is None or np.size(mu0) == 0):
+            raise ValueError('mu0 needs one entry per coupling constraint; set unconstrained=True if there are none')
 
         # every subproblem reports the coupling constraints ("phi") at the x it returns,
-        # so the algorithm needs no separate constraint function
+        # so the algorithm needs no separate constraint function. An unconstrained
+        # problem has none, so its subproblems must not declare "phi"
+        required = {"x"} if unconstrained else {"x", "phi"}
         for subproblem in self.subproblems:
-            missing = {"x", "phi"} - subproblem.outputs.keys()
+            missing = required - subproblem.outputs.keys()
             if missing:
                 raise ValueError(f'{type(subproblem).__name__} must declare outputs {sorted(missing)} in setup()')
+            if unconstrained and "phi" in subproblem.outputs:
+                raise ValueError(f'{type(subproblem).__name__} declares output "phi", but unconstrained=True')
 
-        # force float dtype; an integer-dtype mu would otherwise truncate penalty growth
-        self.mu = np.asarray(mu0, dtype=float) # penalty parameter(s)
+        # force float dtype; an integer-dtype mu would otherwise truncate penalty growth.
+        # Unconstrained, mu (and with it y and phi) is empty
+        self.mu = np.zeros(0) if unconstrained else np.asarray(mu0, dtype=float) # penalty parameter(s)
 
         self.max_mu = max_mu
         self.rho = rho
@@ -127,6 +155,11 @@ class ALBCD():
         self.opt_tol = np.atleast_1d(np.asarray(opt_tol, dtype=float))
         if self.opt_tol.ndim != 1 or self.opt_tol.size == 0:
             raise ValueError('opt_tol must be a float or a non-empty 1D list/array of floats')
+
+        # phases tighten opt_tol as feasibility improves; unconstrained, there is nothing
+        # to make feasible, so a single phase with the final tolerance is enough
+        if unconstrained:
+            self.opt_tol = self.opt_tol[-1:]
 
         # at least one sweep per outer iteration, so every outer iteration ends with a fresh phi
         if max_inner_iter < 1:
@@ -141,7 +174,7 @@ class ALBCD():
         self.feas_history = [] # feasibility (max constraint violation) after each subproblem solve
         self.opt_history = []  # optimality (max-norm KKT residual) after each subproblem solve
         self.y = np.zeros_like(self.mu) # Lagrange multipliers, one per coupling constraint
-        self.phi = None # coupling constraints at the current x, from the latest subproblem solve
+        self.phi = np.zeros(0) if unconstrained else None # coupling constraints at the current x, from the latest subproblem solve
         self.success = False # set by solve()
 
 
@@ -174,14 +207,16 @@ class ALBCD():
         self.x = subproblem.outputs["x"]
 
         # phi: the coupling constraints evaluated at the x this subproblem just returned.
-        # np.array copies it, so a subproblem that reuses its output array can't alter c_old
-        if subproblem.outputs["phi"] is None:
-            raise RuntimeError(f'{type(subproblem).__name__}.solve() did not set outputs["phi"]')
-        phi = np.array(subproblem.outputs["phi"], dtype=float)
-        if phi.shape != self.mu.shape:
-            raise ValueError(f'{type(subproblem).__name__}: outputs["phi"] has shape {phi.shape}, '
-                             f'expected {self.mu.shape} (one entry per penalty parameter in mu0)')
-        self.phi = phi
+        # np.array copies it, so a subproblem that reuses its output array can't alter c_old.
+        # Unconstrained subproblems have no phi, so it stays empty
+        if not self.unconstrained:
+            if subproblem.outputs["phi"] is None:
+                raise RuntimeError(f'{type(subproblem).__name__}.solve() did not set outputs["phi"]')
+            phi = np.array(subproblem.outputs["phi"], dtype=float)
+            if phi.shape != self.mu.shape:
+                raise ValueError(f'{type(subproblem).__name__}: outputs["phi"] has shape {phi.shape}, '
+                                 f'expected {self.mu.shape} (one entry per penalty parameter in mu0)')
+            self.phi = phi
 
         # any other declared output goes into the data dictionary
         for name in subproblem.outputs.keys() - {"x", "phi"}:
@@ -216,7 +251,7 @@ class ALBCD():
         # a single outer iteration counter (counted from 1) shared by all phases, so each phase
         # resumes where the previous one stopped and max_outer_iter bounds the whole solve
         outer_iters = iter(range(1, self.max_outer_iter + 1))
-        k = 0 # outer iterations completed
+        k = j = 0 # outer iterations completed, sweeps in the latest outer iteration
         all_blocks_solved = False # every block has solved once, so _optimality() can be evaluated
 
         # tolerance phases: each phase runs outer iterations with its own inner loop
@@ -233,13 +268,15 @@ class ALBCD():
                     for i, subproblem in enumerate(self.subproblems):
 
                         self._set_inputs(subproblem)
-                        subproblem.outputs["phi"] = None # cleared so a solve() that doesn't set phi is caught
+                        if not self.unconstrained:
+                            subproblem.outputs["phi"] = None # cleared so a solve() that doesn't set phi is caught
                         subproblem.solve(subproblem.inputs, subproblem.outputs)
                         self._get_outputs(subproblem)
 
                         if self.save:
                             self.history.append(self.x.copy())
-                            self.feas_history.append(float(np.max(np.abs(self.phi))))
+                            # initial=0 gives an empty (unconstrained) phi a feasibility of 0
+                            self.feas_history.append(float(np.max(np.abs(self.phi), initial=0.0)))
                             # residual() may need data a block caches when it solves, so the
                             # optimality is undefined until every block has solved once
                             ready = all_blocks_solved or i == len(self.subproblems) - 1
@@ -256,6 +293,12 @@ class ALBCD():
 
                     if opt_res <= opt_tol:
                         break
+
+                # unconstrained: there are no coupling constraints to enforce, so the
+                # BCD inner loop is the whole solve and the outer loop stops here
+                if self.unconstrained:
+                    self.success = opt_res <= opt_tol
+                    break
 
 
                 # the last subproblem solved in the sweep evaluated phi at the current x
@@ -287,5 +330,6 @@ class ALBCD():
 
         self.tf = time.perf_counter() - t0
         if self.verbose:
-            print(f"{'Converged' if self.success else 'Did not converge'} after {k} outer iterations ({self.tf:.2f} s)")
+            iters = f'{j} sweeps' if self.unconstrained else f'{k} outer iterations'
+            print(f"{'Converged' if self.success else 'Did not converge'} after {iters} ({self.tf:.2f} s)")
         return None

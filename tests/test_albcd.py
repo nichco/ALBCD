@@ -2,7 +2,8 @@
 
     min (x0 - a)^2 + (x1 - b)^2  s.t.  phi = x0 - x1 = 0
 
-has the solution x0 = x1 = (a + b) / 2 with multiplier y = a - b.
+has the solution x0 = x1 = (a + b) / 2 with multiplier y = a - b. The
+unconstrained tests at the end use problems without coupling constraints.
 """
 
 import numpy as np
@@ -129,7 +130,13 @@ def test_does_not_modify_x0():
     np.testing.assert_array_equal(x0, [0, 0])
 
 
-@pytest.mark.parametrize("kwargs", [{"opt_tol": []}, {"max_inner_iter": 0}])
+@pytest.mark.parametrize("kwargs", [
+    {"opt_tol": []},
+    {"max_inner_iter": 0},
+    {"mu0": None},             # coupling constraints need penalty parameters
+    {"mu0": []},
+    {"unconstrained": True},   # ... and an unconstrained problem has none
+])
 def test_invalid_options(kwargs):
     with pytest.raises(ValueError):
         make_solver(**kwargs)
@@ -170,3 +177,74 @@ def test_subproblem_helpers():
 def test_subproblem_requires_setup():
     with pytest.raises(NotImplementedError):
         Subproblem(slice(0, 1))
+
+
+class QuadraticBlock(Subproblem):
+    """Minimizes (x0 - a)^2 + (x1 - b)^2 + x0 * x1 over this block's entry; no "phi" output."""
+
+    def setup(self):
+        self.add_output("x")
+
+    def solve(self, inputs, outputs):
+        x = inputs["x"]
+        outputs["x"] = self.recompose(x, (A, B)[self.index] - self.other(x)[0] / 2)
+
+    def residual(self, inputs):
+        x = inputs["x"]
+        return abs(2 * (x[self.index] - (A, B)[self.index]) + self.other(x)[0])
+
+
+class PowellBlock(Subproblem):
+    """Minimizes Powell's function exactly over this block's coordinate; no "phi" output.
+
+    f = -x0 x1 - x1 x2 - x0 x2 + sum_i (max(xi - 1, 0)^2 + max(-xi - 1, 0)^2)
+    """
+
+    def setup(self):
+        self.add_output("x")
+
+    def solve(self, inputs, outputs):
+        x = inputs["x"]
+        s = np.sum(self.other(x))
+        outputs["x"] = self.recompose(x, np.sign(s) * (1 + abs(s) / 2))
+
+    def residual(self, inputs):
+        x = inputs["x"]
+        grad = -(np.sum(x) - x) + 2 * np.maximum(x - 1, 0) - 2 * np.maximum(-x - 1, 0)
+        return abs(grad[self.index])
+
+
+def test_unconstrained(capsys):
+    opt = ALBCD([QuadraticBlock(0), QuadraticBlock(1)], x0=np.zeros(2), unconstrained=True,
+                opt_tol=[1e-2, 1e-10], max_inner_iter=100)
+    opt.solve()
+    assert opt.success
+    np.testing.assert_allclose(opt.x, [(4 * A - 2 * B) / 3, (4 * B - 2 * A) / 3], atol=1e-9)
+    assert opt.y.size == opt.mu.size == opt.phi.size == 0
+    np.testing.assert_array_equal(opt.opt_tol, [1e-10])  # a single phase with the final tolerance
+    assert opt.feas_history == [0.0] * (len(opt.history) - 1)
+
+    # the BCD inner loop only: one line per sweep of the single outer iteration
+    lines = capsys.readouterr().out.splitlines()
+    n = len(lines) - 1
+    assert all(line.startswith("outer   1 | sweep") for line in lines[:-1])
+    assert lines[-1].startswith(f"Converged after {n} sweeps")
+
+
+def test_unconstrained_powell():
+    """Powell (1973): exact cyclic coordinate descent cycles instead of converging."""
+    eps = 0.01
+    opt = ALBCD([PowellBlock(i) for i in range(3)], x0=[-1 - eps, 1 + eps / 2, -1 - eps / 4],
+                unconstrained=True, max_inner_iter=6, verbose=False)
+    opt.solve()
+    assert not opt.success
+    assert len(opt.history) == 1 + 6 * 3  # max_inner_iter bounds the whole solve
+    # after six block solves the iterate is back near x0, its perturbation shrunk 64-fold,
+    np.testing.assert_allclose(opt.history[6], [-1 - eps / 64, 1 + eps / 128, -1 - eps / 256], rtol=1e-12)
+    # yet the gradient on this cycle does not vanish
+    assert opt.opt_history[-1] > 1.9
+
+
+def test_unconstrained_rejects_phi():
+    with pytest.raises(ValueError, match="phi"):
+        ALBCD([Block(0, A), Block(1, B)], x0=np.zeros(2), unconstrained=True)
