@@ -284,20 +284,28 @@ ax2.set_xlabel('Spanwise location (m)')
 ax2.set_ylabel('Thickness (mm)')
 plt.tight_layout()
 
-fig, ax = plt.subplots(1, 2, figsize=(8, 2.5))
+fig, ax = plt.subplots(figsize=(4, 2.5))
 
-ax[0].semilogy(error, linewidth=2, color='tab:blue')
-ax[0].set_xlabel('Subproblem solve')
-ax[0].set_ylabel('Relative error')
-ax[0].grid(color='lavender', alpha=0.5, axis='y')
-ax[0].set_xlim([0, len(error) - 1])
-
-ax[1].semilogy(opt.feas_history, linewidth=2, color='tab:orange')
-ax[1].axhline(opt.feas_tol, color='gray', linewidth=1, linestyle='--', alpha=0.8)
-ax[1].set_xlabel('Subproblem solve')
-ax[1].set_ylabel('Feasibility')
-ax[1].grid(color='lavender', alpha=0.5, axis='y')
-ax[1].set_xlim([0, len(opt.feas_history) - 1])
+ax.semilogy(error, linewidth=2, color='tab:blue')
+ax.set_xlabel('Subproblem solve')
+ax.set_ylabel('Relative error')
+ax.grid(color='lavender', alpha=0.5, axis='y')
+ax.set_xlim([0, len(error) - 1])
 
 plt.tight_layout()
+
+
+# optimality and feasibility after every subproblem solve, with their tolerances.
+# Optimality oscillates because solving one block leaves the other non-stationary.
+iterations = np.arange(1, len(opt.feas_history) + 1)  # opt_history[0] is nan; see ALBCD.opt_history
+
+fig, ax = plt.subplots()
+ax.semilogy(iterations, opt.opt_history, color='tab:blue', label='Optimality', linewidth=2)
+ax.semilogy(iterations, opt.feas_history, color='tab:orange', label='Feasibility', linewidth=2)
+ax.axhline(opt.opt_tol[-1], color='tab:blue')
+ax.axhline(opt.feas_tol, color='tab:orange')
+ax.set_xlabel('Iteration')
+ax.set_ylabel('Residual')
+ax.legend()
+
 plt.show()

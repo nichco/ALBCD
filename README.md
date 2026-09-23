@@ -146,7 +146,24 @@ print(opt.success, opt.x)  # True, approximately [0.354 0. 0.354]: x1 = x2 = sqr
 
 ## Examples
 
-See [examples/](https://github.com/nichco/ALBCD/tree/main/examples). Every problem is included twice, once with gradients from JAX and once from PyTorch.
+See [examples/](https://github.com/nichco/ALBCD/tree/main/examples). Every problem below is included twice, once with gradients from JAX and once from PyTorch.
+
+| Example | Notable features |
+| --- | --- |
+| `quadratic_global_circle.py` | Quadratic objective with a nonlinear inequality coupling two blocks via a slack variable; the quick start problem above. |
+| `quadratic_global_linear.py` | Quadratic objective with a linear inequality coupling two blocks. |
+| `quadratic_global_linear_cvxopt.py` | Same problem as `quadratic_global_linear.py`, but each block is solved by CVXOPT using exact Hessians instead of SLSQP. |
+| `quadratic_consensus_circle.py` | Consensus form: each block owns a full copy of the variables and handles the circle constraint locally, with coupling constraints forcing the copies to agree. |
+| `rosenbrock_consensus.py` | Consensus form of the nonconvex Rosenbrock function. |
+| `proximal_rosenbrock_consensus.py` | Same problem as `rosenbrock_consensus.py`, with a proximal term added to each block's subproblem for stabilization. |
+
+Two larger examples solve wing design problems and compare against a monolithic (single-solve) reference:
+
+| Example | Notable features |
+| --- | --- |
+| [aerostruct/](https://github.com/nichco/ALBCD/tree/main/examples/pytorch/aerostruct) (JAX and PyTorch) | Aerostructural wing design: minimizes drag subject to lift = weight while sizing the spar wall thickness for a tip-deflection constraint. Aerodynamics (vortex-lattice) and structure (beam FE) are the two coupled blocks. |
+| [uCRM/](https://github.com/nichco/ALBCD/tree/main/examples/pytorch/uCRM) (PyTorch only) | Multipoint wing design: minimizes average fuel burn over N missions with different payloads/ranges, each mission a block with its own copy of the wing twist coupled by consensus. |
+
 
 ## Tests
 
