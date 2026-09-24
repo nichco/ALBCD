@@ -263,28 +263,33 @@ ax2.set_xlabel('Spanwise location (m)')
 ax2.set_ylabel('Thickness (mm)')
 plt.tight_layout()
 
-fig, ax = plt.subplots(figsize=(4, 2.5))
-
-ax.semilogy(error, linewidth=2, color='tab:blue')
-ax.set_xlabel('Subproblem solve')
-ax.set_ylabel('Relative error')
-ax.grid(color='lavender', alpha=0.5, axis='y')
-ax.set_xlim([0, len(error) - 1])
-
-plt.tight_layout()
-
 
 # optimality and feasibility after every subproblem solve, with their tolerances.
 # Optimality oscillates because solving one block leaves the other non-stationary.
 iterations = np.arange(1, len(opt.feas_history) + 1)  # opt_history[0] is nan; see ALBCD.opt_history
 
-fig, ax = plt.subplots()
-ax.semilogy(iterations, opt.opt_history, color='tab:blue', label='Optimality', linewidth=2)
-ax.semilogy(iterations, opt.feas_history, color='tab:orange', label='Feasibility', linewidth=2)
-ax.axhline(opt.opt_tol[-1], color='tab:blue')
-ax.axhline(opt.feas_tol, color='tab:orange')
-ax.set_xlabel('Iteration')
-ax.set_ylabel('Residual')
-ax.legend()
+fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(8, 2.5))
+ax1.semilogy(iterations, opt.opt_history, color='tab:blue', linewidth=2)
+# ax1.axhline(opt.opt_tol[-1], color='tab:gray', linewidth=1, linestyle='--', alpha=0.5)
+# ax1.annotate('Tolerance', xy=(0.3, opt.opt_tol[-1]), xycoords=('axes fraction', 'data'), xytext=(0, 3), textcoords='offset points', ha='center', color='tab:gray', fontsize=8)
+ax1.set_xlabel('Iteration')
+ax1.set_ylabel('Optimality')
+ax1.grid(color='lavender', alpha=0.5, axis='y')
+
+ax2.semilogy(iterations, opt.feas_history, color='tab:orange', linewidth=2)
+# ax2.axhline(opt.feas_tol, color='tab:gray', linewidth=1, linestyle='--', alpha=0.5)
+# ax2.annotate('Tolerance', xy=(0.3, opt.feas_tol), xycoords=('axes fraction', 'data'), xytext=(0, 3), textcoords='offset points', ha='center', color='tab:gray', fontsize=8)
+ax2.set_xlabel('Iteration')
+ax2.set_ylabel('Feasibility')
+ax2.grid(color='lavender', alpha=0.5, axis='y')
+
+ax3.semilogy(error, linewidth=2, color='tab:red')
+ax3.set_xlabel('Iteration')
+ax3.set_ylabel('Relative error')
+ax3.grid(color='lavender', alpha=0.5, axis='y')
+
+plt.tight_layout()
+
+# plt.savefig('aerostruct.pdf')
 
 plt.show()

@@ -28,5 +28,7 @@ are explicit, so it needs only NumPy and matplotlib.
 
 Two larger wing design examples are in
 [jax/aerostruct/](jax/aerostruct/README.md) and [pytorch/aerostruct/](pytorch/aerostruct/README.md)
-(aerostructural design) and, in PyTorch only, [pytorch/uCRM/](pytorch/uCRM/README.md)
-(multipoint design).
+(aerostructural design) and in [jax/uCRM/](jax/uCRM/README.md) and
+[pytorch/uCRM/](pytorch/uCRM/README.md) (multipoint design). A cart-pole
+co-design problem under uncertainty is in [jax/cart_pole/](jax/cart_pole/README.md) and
+[pytorch/cart_pole/](pytorch/cart_pole/README.md).

@@ -220,3 +220,6 @@ __marimo__/
 # Files written by the examples
 examples/**/*.pdf
 *_outputs/
+
+
+.pdf

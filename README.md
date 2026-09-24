@@ -174,12 +174,13 @@ See [examples/](https://github.com/nichco/ALBCD/tree/main/examples). Every probl
 
 [powell.py](https://github.com/nichco/ALBCD/blob/main/examples/powell.py) is Powell's unconstrained example (`unconstrained=True`), on which block coordinate descent cycles around six vertices of a cube instead of converging. Each block's minimizer and residual are explicit, so it needs only NumPy and matplotlib.
 
-Two larger examples solve wing design problems and compare against a monolithic (single-solve) reference:
+Three larger examples solve engineering design problems and compare against a monolithic (single-solve) reference:
 
 | Example | Notable features |
 | --- | --- |
 | [aerostruct/](https://github.com/nichco/ALBCD/tree/main/examples/pytorch/aerostruct) (JAX and PyTorch) | Aerostructural wing design: minimizes drag subject to lift = weight while sizing the spar wall thickness for a tip-deflection constraint. Aerodynamics (vortex-lattice) and structure (beam FE) are the two coupled blocks. |
-| [uCRM/](https://github.com/nichco/ALBCD/tree/main/examples/pytorch/uCRM) (PyTorch only) | Multipoint wing design: minimizes average fuel burn over N missions with different payloads/ranges, each mission a block with its own copy of the wing twist coupled by consensus. |
+| [uCRM/](https://github.com/nichco/ALBCD/tree/main/examples/pytorch/uCRM) (JAX and PyTorch) | Multipoint wing design: minimizes average fuel burn over N missions with different payloads/ranges, each mission a block with its own copy of the wing twist coupled by consensus. |
+| [cart_pole/](https://github.com/nichco/ALBCD/tree/main/examples/pytorch/cart_pole) (JAX and PyTorch) | Cart-pole co-design under uncertainty: designs the pole's length and mass together with a collocated swing-up trajectory to minimize the mean control effort over N sampled gravity/friction scenarios, each scenario a block with its own copy of the pole design coupled by consensus. |
 
 
 ## Tests
