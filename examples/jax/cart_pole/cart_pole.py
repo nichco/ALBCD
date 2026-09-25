@@ -14,6 +14,9 @@ the convergence.
 """
 
 import os
+# SLSQP's matrices are small (about 150 x 150 per block), and OpenBLAS's multithreading
+# costs more than it saves on them. Must be set before numpy/scipy load OpenBLAS.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 import numpy as np
 import jax
 import jax.numpy as jnp

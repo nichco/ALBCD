@@ -6,6 +6,9 @@ which cart_pole.py compares the ALBCD solution against.
 """
 
 import os
+# SLSQP's matrices are small at moderate N (about 150N x 150N), and OpenBLAS's multithreading
+# costs more than it saves on them. Must be set before numpy/scipy load OpenBLAS.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 import numpy as np
 import jax
 import jax.numpy as jnp
