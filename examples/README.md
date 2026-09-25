@@ -20,6 +20,8 @@ and run any example directly, e.g. `python examples/pytorch/rosenbrock_consensus
 | `rosenbrock_consensus.py` | Consensus form of the nonconvex Rosenbrock function. |
 | `proximal_rosenbrock_consensus.py` | Same problem as `rosenbrock_consensus.py`, with a proximal term added to each block's subproblem for stabilization. |
 | `2d_rosenbrock.py` | Unconstrained (`unconstrained=True`) two-dimensional Rosenbrock function with one variable per block: plain block coordinate descent zigzags along the valley to the minimum. |
+| `scalable_test_problem.py` | Monolithic reference for `scalable_test_problem_albcd.py`: `N` Rosenbrock subproblems sharing `n0` global variables, each with `ni` local variables and a sphere constraint, plus one global linear inequality, solved with a single SLSQP. |
+| `scalable_test_problem_albcd.py` | ALBCD version of `scalable_test_problem.py`, with adjustable sizes `N`, `n0` and `ni`: each block owns a local copy of the global variables, kept in agreement by spanning-tree (chain) consensus constraints, and handles its sphere constraint locally. The global inequality enters the augmented Lagrangian through a slack variable. |
 
 [powell.py](powell.py) is Powell's unconstrained example
 (`unconstrained=True`), on which block coordinate descent cycles around six

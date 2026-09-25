@@ -156,9 +156,23 @@ class DisciplineBlock(Subproblem):
         self.lower = np.where(self.CL > -np.inf)[0]
         self.upper = np.where(self.CU < np.inf)[0]
 
-        # compiled once: the inputs that change between solves are arguments, not constants
-        self._fns = Compiled(jax.jit(self.lagrangian), jax.jit(jax.grad(self.lagrangian)),
-                             jax.jit(self.local_constraints), jax.jit(jax.jacrev(self.local_constraints)))
+        # compiled once: the inputs that change between solves are arguments, not constants. Every
+        # call evaluates this block's discipline at its variables v, or its derivatives, and is
+        # counted in models.evaluations
+        self._fns = Compiled(self.counted(jax.jit(self.lagrangian), False),
+                             self.counted(jax.jit(jax.grad(self.lagrangian)), True),
+                             self.counted(jax.jit(self.local_constraints), False),
+                             self.counted(jax.jit(jax.jacrev(self.local_constraints)), True))
+
+    def counted(self, fn, derivative):
+        """fn(v, ...), counted as an evaluation of this block's discipline (or its derivatives) at v.
+
+        The discipline's inputs are all variables of this block, so v determines them.
+        """
+        def wrapper(v, *args):
+            models.evaluations(self.NAME, v, derivative)
+            return fn(v, *args)
+        return wrapper
 
     def join(self, v, other):
         """The global x from this block's variables v and the others' variables."""
@@ -205,11 +219,13 @@ class DisciplineBlock(Subproblem):
         self._jac_con = np.array(fns.jac(jnp.asarray(v), other))
 
         x_new = self.recompose(x, v)
+        models.evaluations(self.NAME, v)
         own = type(self).MODEL(jnp.asarray(x_new))[0]
         outputs["x"] = x_new
         outputs[self.NAME] = np.array(own)
         # the other blocks' variables, and so their outputs, are unchanged by this solve
         outputs["phi"] = np.array(coupling(jnp.asarray(x_new), dict(outs, **{self.NAME: own})))
+        trace.append((models.evaluations.analyses, models.evaluations.derivatives, x_new[INSTANCES]))
 
     def residual(self, inputs) -> float:
         """Max-norm KKT stationarity residual, with respect to the scaled variables."""
@@ -250,31 +266,55 @@ class PropulsionBlock(DisciplineBlock):
     CU = models.cu[7:]
 
 
+# the evaluation counts and every copy of every design variable after each subproblem solve, for
+# comparing the cost of distributed methods (compare_co_albcd.py)
+INSTANCES = list(DESIGN)                   # the entries of x that are design variables
+INSTANCE_Z = [DESIGN[i] for i in INSTANCES]  # the entry of z each one copies
+trace = []
+models.evaluations.reset()
+
+
+def evaluate(name, model, index, x):
+    """A discipline's outputs at x, counted as an evaluation at its block's variables."""
+    models.evaluations(name, x[index])
+    return np.array(model(x)[0])
+
+
 # the initial design, with every copy of a shared design variable at its initial value. The
 # coupling variable copies come from one pass through the disciplines, starting from the guesses.
 x0 = np.zeros(N)
 for i, j in DESIGN.items():
     x0[i] = models.x0[j]
 x0[COPIES] = copy_ref
-x0[A_WT], _, x0[A_TWIST] = structure_model(x0)[0]
-x0[S_LIFT], x0[P_DRAG], _ = aerodynamics_model(x0)[0]
-_, x0[S_WE], x0[A_ESF] = propulsion_model(x0)[0]
-data0 = {"structure": np.array(structure_model(x0)[0]),
-         "aerodynamics": np.array(aerodynamics_model(x0)[0]),
-         "propulsion": np.array(propulsion_model(x0)[0])}
+x0[A_WT], _, x0[A_TWIST] = evaluate("structure", structure_model, STRUCT_INDEX, x0)
+x0[S_LIFT], x0[P_DRAG], _ = evaluate("aerodynamics", aerodynamics_model, AERO_INDEX, x0)
+_, x0[S_WE], x0[A_ESF] = evaluate("propulsion", propulsion_model, PROP_INDEX, x0)
+data0 = {"structure": evaluate("structure", structure_model, STRUCT_INDEX, x0),
+         "aerodynamics": evaluate("aerodynamics", aerodynamics_model, AERO_INDEX, x0),
+         "propulsion": evaluate("propulsion", propulsion_model, PROP_INDEX, x0)}
+trace.append((models.evaluations.analyses, models.evaluations.derivatives, x0[INSTANCES]))
 
 opt = ALBCD(subproblems=[StructureBlock(STRUCT_INDEX), AerodynamicsBlock(AERO_INDEX), PropulsionBlock(PROP_INDEX)],
             x0=x0,
             mu0=np.ones(N_CON),
             data0=data0,
-            max_mu=1e6,
-            rho=1.2,
+            # large penalties couple the blocks tightly, and each sweep then does little: at mu ~ 1e3
+            # the optimality residual falls only ~4% per sweep. The multipliers enforce the coupling
+            # constraints instead of the penalties.
+            max_mu=1e2,
+            # tuned for fewest discipline evaluations: a loose first phase updates the multipliers
+            # after only a sweep or two per outer iteration, while fast penalty growth enforces the
+            # coupling constraints early. Against rho=1.2 and opt_tol=[1e-2, 1e-5], this cuts the
+            # analyses to a converged solution from ~28600 to ~10800, and those to a design error
+            # of 1e-4 from ~22000 to ~2000.
+            rho=3.0,
             tau=0.5,
             feas_tol=1e-6,
-            opt_tol=[1e-2, 1e-5],
-            max_outer_iter=100,
-            # once the penalties are large, each sweep reduces the optimality residual by only
-            # ~10%, so the inner loop needs many sweeps to reach the final opt_tol
+            opt_tol=[1.0, 1e-5],
+            # each outer iteration is cheap, a sweep or two early on, but there are many
+            max_outer_iter=300,
+            # in the final phase each sweep can reduce the optimality residual by only a few
+            # percent, so the inner loop may need many sweeps to reach the final opt_tol
             max_inner_iter=100)
 
 opt.solve()
@@ -293,6 +333,7 @@ error = np.array([np.max(np.abs(h[Z_FROM_X] - solution["z"]) / scale) for h in o
 print(f"\nRange (MDF): {float(solution['range']):.2f} nm")
 print(f"Max design error relative to the bound widths: {error[-1]:.2e}")
 print(f"Max coupling constraint violation: {np.max(np.abs(opt.phi)):.2e}")
+print(f"Discipline evaluations: {models.evaluations.analyses} analyses, {models.evaluations.derivatives} derivatives")
 
 
 # optimality and feasibility after every subproblem solve.

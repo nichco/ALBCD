@@ -32,7 +32,11 @@ names = ["thickness/chord", "altitude (ft)", "Mach number", "aspect ratio", "swe
          "wing area (ft^2)", "taper ratio", "wingbox area", "skin friction", "throttle"]
 x0 = np.array([0.05, 45000.0, 1.6, 5.5, 55.0, 1000.0, 0.25, 1.0, 1.0, 0.5])
 xl = np.array([0.01, 30000.0, 1.4, 2.5, 40.0, 500.0, 0.1, 0.75, 0.75, 0.1])
-xu = np.array([0.09, 60000.0, 1.8, 8.5, 70.0, 1500.0, 0.4, 1.25, 1.25, 1.0])
+# The standard upper bound on t/c is 0.09. Above t/c = 0.0625 the pressure gradient polynomial
+# is clipped at 1.05, which violates its limit of 1.04, and flat, so an optimizer that gets
+# there sees no gradient back to feasibility. The constraint alone requires t/c <= 0.06, so
+# the bound 0.0625 removes only infeasible designs and leaves the optimum unchanged.
+xu = np.array([0.0625, 60000.0, 1.8, 8.5, 70.0, 1500.0, 0.4, 1.25, 1.25, 1.0])
 
 # BLISS's optimum, as reported in GEMSEO. Its taper ratio is short of the upper bound
 # 0.4, where these models give a longer range: 3963.38 nm, against 3963.17 nm at z_bliss.
@@ -204,6 +208,40 @@ def analysis(z):
     u = jax.lax.custom_root(lambda u: disciplines(u, z)[0] - u, u0, gauss_seidel,
                             lambda g, y: jnp.linalg.solve(jax.jacfwd(g)(y), y))
     return disciplines(u, z)[1]
+
+
+class EvaluationCounter:
+    """Counts evaluations of the structure, aerodynamics and propulsion disciplines.
+
+    ``analyses`` counts evaluations of a discipline's outputs and ``derivatives`` evaluations of
+    its derivatives. Each discipline remembers its last input, as a discipline's solver would
+    keep its last solution: a repeated request at that input is free, and so is the analysis
+    behind a derivative evaluation at an input already analyzed. A derivative evaluation at a
+    new input also counts an analysis. The distributed scripts report every discipline call
+    their algorithms make here, keyed by the discipline and its input.
+    """
+
+    def __init__(self):
+        self.reset()
+
+    def reset(self):
+        self.analyses = 0
+        self.derivatives = 0
+        self._last = {}  # discipline -> (last analyzed input, last differentiated input)
+
+    def __call__(self, discipline, v, derivative=False):
+        key = np.asarray(v, dtype=float).tobytes()
+        analyzed, differentiated = self._last.get(discipline, (None, None))
+        if key != analyzed:
+            self.analyses += 1
+            analyzed = key
+        if derivative and key != differentiated:
+            self.derivatives += 1
+            differentiated = key
+        self._last[discipline] = (analyzed, differentiated)
+
+
+evaluations = EvaluationCounter()
 
 
 def design_constraints(stress, twist, pressure_gradient, esf, throttle_ratio, temperature):

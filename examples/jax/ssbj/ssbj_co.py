@@ -101,20 +101,32 @@ class Discipline:
         self.vu = np.array([models.xu[j] if k == "z" else su[j] for k, j in index])
         self.v_scaler = 1 / (self.vu - self.vl)
         self.cl, self.cu = cl, cu
+        # the entries of v that are design variables or copies of them, and the entry of z each copies
+        design = [(p, j) for p, (k, j) in enumerate(index) if k == "z" or j < 6]
+        self.design_positions = [p for p, _ in design]
+        self.design_z = [j for _, j in design]
 
         def J(v, s):
             return jnp.sum(((values(v)[0] - s[self.match]) * s_scaler[self.match])**2)
 
-        self.values = jax.jit(lambda v: values(v)[0])
-        self.J = jax.jit(J)
-        self.dJdv = jax.jit(jax.grad(J))
-        self.dJds = jax.jit(jax.grad(J, argnums=1))
-        self.con = jax.jit(lambda v: values(v)[1])
-        self.jac = jax.jit(jax.jacfwd(lambda v: values(v)[1]))
+        # every call evaluates this discipline at v, or its derivatives, and is counted in
+        # models.evaluations. The discipline's inputs are all in v.
+        self.J = self.counted(jax.jit(J), False)
+        self.dJdv = self.counted(jax.jit(jax.grad(J)), True)
+        self.dJds = self.counted(jax.jit(jax.grad(J, argnums=1)), True)
+        self.con = self.counted(jax.jit(lambda v: values(v)[1]), False)
+        self.jac = self.counted(jax.jit(jax.jacfwd(lambda v: values(v)[1])), True)
         self.solves = 0
 
+    def counted(self, fn, derivative):
+        """fn(v, ...), counted as an evaluation of this discipline (or its derivatives) at v."""
+        def wrapper(v, *args):
+            models.evaluations(self.name, v, derivative)
+            return fn(v, *args)
+        return wrapper
+
     def solve(self, s):
-        """J_i*(s) and dJ_i*/ds, warm started from the previous solution."""
+        """J_i*(s), warm started from the previous solution."""
         s = jnp.asarray(s)
         prob = mo.ProblemLite(x0=self.v, obj=lambda v: float(self.J(jnp.asarray(v), s)),
                               grad=lambda v: np.array(self.dJdv(jnp.asarray(v), s)),
@@ -126,8 +138,11 @@ class Discipline:
         optimizer.solve()
         self.v = np.clip(optimizer.results["x"] / self.v_scaler, self.vl, self.vu)
         self.solves += 1
-        v = jnp.asarray(self.v)
-        return float(self.J(v, s)), np.array(self.dJds(v, s))
+        return float(self.J(jnp.asarray(self.v), s))
+
+    def gradient(self, s):
+        """dJ_i*/ds at the last solution, by the envelope theorem."""
+        return np.array(self.dJds(jnp.asarray(self.v), jnp.asarray(s)))
 
 
 disciplines = [
@@ -144,26 +159,47 @@ disciplines = [
                [H, M, DRAG], models.cl[7:], models.cu[7:]),
 ]
 
-cache = {}
+# the evaluation counts and every copy of every design variable at each system point, for
+# comparing the cost of distributed methods (compare_co_albcd.py)
+INSTANCE_Z = list(range(6)) + [j for d in disciplines for j in d.design_z]  # the entry of z each copies
+trace = []
+models.evaluations.reset()
+
+
+def record(s):
+    instances = np.concatenate([s[:6]] + [d.v[d.design_positions] for d in disciplines])
+    trace.append((models.evaluations.analyses, models.evaluations.derivatives, instances))
+
+
+solved = {"s": None}  # the system point the subproblems were last solved at, and their results
 
 
 def compatibility(s):
-    """[J_1*, J_2*, J_3*] and their gradients, solving the subproblems once per system point."""
-    key = s.tobytes()
-    if key not in cache:
-        cache.clear()
-        results = [d.solve(s) for d in disciplines]
-        cache[key] = (np.array([J for J, _ in results]), np.array([g for _, g in results]))
-        history.append((s.copy(), cache[key][0]))
-    return cache[key]
+    """[J_1*, J_2*, J_3*], solving the subproblems once per system point."""
+    if solved["s"] is None or not np.array_equal(s, solved["s"]):
+        solved.update(s=s.copy(), J=np.array([d.solve(s) for d in disciplines]), grad=None)
+        history.append((s.copy(), solved["J"]))
+        record(s)
+    return solved["J"]
+
+
+def compatibility_jacobian(s):
+    """dJ_i*/ds, only when the system optimizer asks for it, so line search points don't pay for it."""
+    compatibility(s)
+    if solved["grad"] is None:
+        solved["grad"] = np.array([d.gradient(s) for d in disciplines])
+        # the same design, now also charged for the gradients
+        trace[-1] = (models.evaluations.analyses, models.evaluations.derivatives, trace[-1][2])
+    return solved["grad"]
 
 
 history = []  # (s, [J_i*]) at every system point where the subproblems were solved
+record(s0)
 obj, grad = jax.jit(system_objective), jax.jit(jax.grad(system_objective))
 
 # modopt scales s by s_scaler before SLSQP sees it, and J_i* <= eps by 1 / eps
 prob = mo.ProblemLite(x0=s0, obj=lambda s: float(obj(jnp.asarray(s))), grad=lambda s: np.array(grad(jnp.asarray(s))),
-                      con=lambda s: compatibility(np.asarray(s))[0], jac=lambda s: compatibility(np.asarray(s))[1],
+                      con=lambda s: compatibility(np.asarray(s)), jac=lambda s: compatibility_jacobian(np.asarray(s)),
                       xl=sl, xu=su, cl=np.full(3, -np.inf), cu=np.full(3, EPS),
                       x_scaler=s_scaler, c_scaler=1 / EPS, name="co_system")
 
@@ -176,7 +212,7 @@ t_solve = time.perf_counter() - t_start
 optimizer.print_results()
 
 s_star = optimizer.results["x"] / s_scaler
-Js, _ = compatibility(s_star)
+Js = solved["J"]  # SLSQP returns the last system point, so the subproblems needn't be solved again
 
 # the design: the shared design variables from the system level and the local ones from the subproblems
 z = np.concatenate([s_star[:6], disciplines[0].v[:2], disciplines[1].v[:1], disciplines[2].v[:1]])
@@ -193,6 +229,7 @@ print(f"Compatibility J_i*: {Js}")
 print(f"Max design error relative to the bound widths: {np.max(np.abs(z - solution['z']) / scale):.2e}")
 print(f"System iterations: {optimizer.results['nit']}, system points: {len(history)}, "
       f"subproblem solves: {sum(d.solves for d in disciplines)}, time: {t_solve:.1f} s")
+print(f"Discipline evaluations: {models.evaluations.analyses} analyses, {models.evaluations.derivatives} derivatives")
 
 print(f"\n{'Target':<18}{'Initial':>12}{'Optimal':>12}")
 for name, a, b in zip(target_names, t0, s_star[6:]):
