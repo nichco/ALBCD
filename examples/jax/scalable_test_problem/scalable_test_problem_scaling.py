@@ -129,7 +129,9 @@ def solve_case(N, n0, ni):
                                   grad=lambda v: self.grad(v, *args),
                                   con=self.con, jac=self.jac,
                                   xl=xl[self.index], xu=xu[self.index], cl=-np.inf, cu=0.8 ** 2)
-            optimizer = mo.SLSQP(prob, solver_options={'maxiter': 300, 'ftol': 1e-10}, turn_off_outputs=True)
+            # ftol bounds the objective's change, so v is accurate to only ~sqrt(ftol): 1e-10 left
+            # an error floor near 1e-5 that stalled ALBCD for larger N
+            optimizer = mo.SLSQP(prob, solver_options={'maxiter': 300, 'ftol': 1e-14}, turn_off_outputs=True)
             optimizer.solve()
             v = optimizer.results['x']
             counts["solves"] += 1
