@@ -4,7 +4,6 @@ Solves the problem for a range of sizes (N subproblems, n0 global variables, ni 
 variables per subproblem) with the same ALBCD settings and tolerances, and records for each:
 
 - solves:       subproblem (block) solves
-- iterations:   SLSQP iterations, summed over all subproblem solves
 - analyses:     subproblem model evaluations
 - derivatives:  subproblem model derivative evaluations
 - wall_time:    ALBCD solve time in seconds, after the JAX functions are compiled
@@ -21,8 +20,6 @@ input is free (SLSQP asks for the objective and the constraint separately at the
 for example), and a derivative evaluation at a new input also counts an analysis. Every
 evaluation ALBCD makes counts, including its optimality checks. The coupling constraints are
 linear in the variables, so they need no model evaluations.
-
-Results are saved to scalable_test_problem_scaling.npz after every case.
 """
 
 import os
@@ -86,7 +83,7 @@ def solve_case(N, n0, ni):
     obj_fn, grad_fn = jax.jit(merit), jax.jit(jax.grad(merit))
     con_fn, jac_fn = jax.jit(con), jax.jit(jax.jacobian(con))
 
-    counts = dict(solves=0, iterations=0, analyses=0, derivatives=0)
+    counts = dict(solves=0, analyses=0, derivatives=0)
 
     class Block(Subproblem):
 
@@ -136,7 +133,6 @@ def solve_case(N, n0, ni):
             optimizer.solve()
             v = optimizer.results['x']
             counts["solves"] += 1
-            counts["iterations"] += optimizer.results['nit']
 
             # SLSQP's multiplier of 0.8^2 - c >= 0, and the constraint gradient, for residual()
             self._multiplier = np.asarray(optimizer.results['multipliers'])
@@ -184,7 +180,7 @@ for N, n0, ni in CASES:
     result = solve_case(N, n0, ni)
     results.append(dict(N=N, n0=n0, ni=ni, **result))
     print(f"N={N:3d} n0={n0:3d} ni={ni:3d} | success {result['success']!s:5} | solves {result['solves']:5d} | "
-          f"iterations {result['iterations']:6d} | analyses {result['analyses']:6d} | "
+          f"analyses {result['analyses']:6d} | "
           f"derivatives {result['derivatives']:6d} | wall time {result['wall_time']:7.2f} s")
 
     # saved after every case, so a partial study is kept

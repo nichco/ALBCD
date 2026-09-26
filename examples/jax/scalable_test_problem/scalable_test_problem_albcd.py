@@ -20,7 +20,7 @@ from albcd import ALBCD, Subproblem
 import warnings
 warnings.filterwarnings("ignore")
 
-N = 4 # number of subproblems
+N = 10 # number of subproblems
 n0 = 10 # number of global variables
 ni = 20 # number of local variables
 m = n0 + ni # variables per subproblem: [z_i, x_i]

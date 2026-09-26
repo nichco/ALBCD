@@ -41,9 +41,15 @@ cl = np.full(N + 1, -np.inf)
 jaxprob = JaxProblem(x0=x0, jax_obj=jaxobj, jax_con=jaxcon, 
                      order=1, xl=xl, xu=xu, cl=cl, cu=cu, o_scaler=1e-2)
 
-optimizer = SLSQP(jaxprob, solver_options={'maxiter': 300, 'ftol': 1e-7}, turn_off_outputs=True)
+# a tight ftol for a high quality reference solution: the subproblems are identical, so their
+# local variables agree at the exact solution, and here they agree to ~1e-9 (~1e-7 with ftol=1e-14)
+optimizer = SLSQP(jaxprob, solver_options={'maxiter': 1000, 'ftol': 1e-16}, turn_off_outputs=True)
 optimizer.solve()
 optimizer.print_results()
 
 x = optimizer.results['x']
 print(x)
+
+# saved for solution_error.py, which measures the ALBCD solution's error against it
+np.savez(os.path.join(os.path.dirname(os.path.abspath(__file__)), f"monolithic_solution_N_{N}_n0_{n0}_ni_{ni}.npz"),
+         x0=x[:n0], xs=x[n0:].reshape(N, ni), objective=float(jaxobj(x)))
