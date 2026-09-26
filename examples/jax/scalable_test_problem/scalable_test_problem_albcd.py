@@ -9,7 +9,8 @@ inside the block. The coupling constraints phi are
 
 and are enforced through the augmented Lagrangian. The last block also owns the slack.
 """
-
+import os
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1") # speedup
 import numpy as np
 import jax
 jax.config.update("jax_enable_x64", True)
