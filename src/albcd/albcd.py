@@ -135,12 +135,12 @@ class ALBCD():
         # so the algorithm needs no separate constraint function. An unconstrained
         # problem has none, so its subproblems must not declare "phi"
         required = {"x"} if unconstrained else {"x", "phi"}
-        for subproblem in self.subproblems:
-            missing = required - subproblem.outputs.keys()
+        for sub in self.subproblems:
+            missing = required - sub.outputs.keys()
             if missing:
-                raise ValueError(f'{type(subproblem).__name__} must declare outputs {sorted(missing)} in setup()')
-            if unconstrained and "phi" in subproblem.outputs:
-                raise ValueError(f'{type(subproblem).__name__} declares output "phi", but unconstrained=True')
+                raise ValueError(f'{type(sub).__name__} must declare outputs {sorted(missing)} in setup()')
+            if unconstrained and "phi" in sub.outputs:
+                raise ValueError(f'{type(sub).__name__} declares output "phi", but unconstrained=True')
 
         # force float dtype; an integer-dtype mu would otherwise truncate penalty growth.
         # Unconstrained, mu (and with it y and phi) is empty
@@ -230,10 +230,10 @@ class ALBCD():
         # refresh every subproblem's inputs to the current state before checking
         # optimality -- a subproblem's own inputs may be stale relative to blocks
         # that moved after it
-        for subproblem in self.subproblems:
-            self._set_inputs(subproblem)
+        for sub in self.subproblems:
+            self._set_inputs(sub)
 
-        return max(subproblem.residual(subproblem.inputs) for subproblem in self.subproblems)
+        return max(sub.residual(sub.inputs) for sub in self.subproblems)
 
 
     def solve(self) -> "ALBCD":
@@ -268,13 +268,13 @@ class ALBCD():
                 # BCD inner loop (sweeps counted from 1)
                 for j in range(1, self.max_inner_iter + 1):
 
-                    for i, subproblem in enumerate(self.subproblems):
+                    for i, sub in enumerate(self.subproblems):
 
-                        self._set_inputs(subproblem)
+                        self._set_inputs(sub)
                         if not self.unconstrained:
-                            subproblem.outputs["phi"] = None # cleared so a solve() that doesn't set phi is caught
-                        subproblem.solve(subproblem.inputs, subproblem.outputs)
-                        self._get_outputs(subproblem)
+                            sub.outputs["phi"] = None # cleared so a solve() that doesn't set phi is caught
+                        sub.solve(sub.inputs, sub.outputs)
+                        self._get_outputs(sub)
 
                         if self.save:
                             self.history.append(self.x.copy())
