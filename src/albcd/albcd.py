@@ -236,8 +236,11 @@ class ALBCD():
         return max(subproblem.residual(subproblem.inputs) for subproblem in self.subproblems)
 
 
-    def solve(self) -> None:
-        """Run ALBCD; the results are stored in the attributes ``x``, ``y``, ``mu``, ``phi``, ``data`` and ``success``."""
+    def solve(self) -> "ALBCD":
+        """Run ALBCD; the results are stored in the attributes ``x``, ``y``, ``mu``, ``phi``, ``data`` and ``success``.
+
+        Returns the solver itself, so ``opt = ALBCD(...).solve()`` works.
+        """
 
         t0 = time.perf_counter()
         num_phases = len(self.opt_tol)
@@ -332,4 +335,4 @@ class ALBCD():
         if self.verbose:
             iters = f'{j} sweeps' if self.unconstrained else f'{k} outer iterations'
             print(f"{'Converged' if self.success else 'Did not converge'} after {iters} ({self.tf:.2f} s)")
-        return None
+        return self

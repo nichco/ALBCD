@@ -55,7 +55,7 @@ def make_solver(**kwargs):
 @pytest.mark.parametrize("opt_tol", [1e-10, [1e-2, 1e-10]])
 def test_converges_to_known_solution(opt_tol):
     opt = make_solver(opt_tol=opt_tol)
-    opt.solve()
+    assert opt.solve() is opt
     assert opt.success
     np.testing.assert_allclose(opt.x, [(A + B) / 2] * 2, atol=1e-7)
     np.testing.assert_allclose(opt.y, [A - B], atol=1e-6)
