@@ -1,5 +1,7 @@
 # ALBCD
 
+> **Distribution Statement A. Approved for public release: distribution is unlimited. Approved AFRL-2026-1671 28-09-2026.**
+
 **Augmented Lagrangian block coordinate descent**
 
 Augmented Lagrangian block coordinate descent (ALBCD) is a coordination scheme for distributed

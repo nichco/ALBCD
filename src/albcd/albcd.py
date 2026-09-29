@@ -1,3 +1,5 @@
+# Distribution Statement A. Approved for public release: distribution is unlimited. Approved AFRL-2026-1671 28-09-2026.
+
 """The ALBCD solver."""
 
 import time
@@ -171,8 +173,8 @@ class ALBCD():
         self.save = save
         self.verbose = verbose
         self.history = [self.x.copy()] if self.save else []
-        self.feas_history = [] # feasibility (max constraint violation) after each subproblem solve
-        self.opt_history = []  # optimality (max-norm KKT residual) after each subproblem solve
+        self.feas_log = [] # feasibility (max constraint violation) after each subproblem solve
+        self.opt_log = []  # optimality (max-norm KKT residual) after each subproblem solve
         self.y = np.zeros_like(self.mu) # Lagrange multipliers, one per coupling constraint
         self.phi = np.zeros(0) if unconstrained else None # coupling constraints at the current x, from the latest subproblem solve
         self.success = False # set by solve()
@@ -237,102 +239,79 @@ class ALBCD():
 
 
     def solve(self) -> "ALBCD":
-        """Run ALBCD; the results are stored in the attributes ``x``, ``y``, ``mu``, ``phi``, ``data`` and ``success``.
-
-        Returns the solver itself, so ``opt = ALBCD(...).solve()`` works.
-        """
 
         t0 = time.perf_counter()
-        num_phases = len(self.opt_tol)
+        log = print if self.verbose else lambda *args: None
         self.success = False
-
-        # no constraint values exist before the first sweep; an infinite previous violation
-        # means no constraint fails the progress test in _update_mu on the first outer
-        # iteration, so mu is left unchanged there. Carried forward via c_old = c_new below
-        c_old = np.full_like(self.mu, np.inf)
+        phi_old = np.full_like(self.mu, np.inf)  # no penalty grows on the first outer iteration
 
         # a single outer iteration counter (counted from 1) shared by all phases, so each phase
         # resumes where the previous one stopped and max_outer_iter bounds the whole solve
-        outer_iters = iter(range(1, self.max_outer_iter + 1))
+        # outer_iters = iter(range(1, self.max_outer_iter + 1))
         k = j = 0 # outer iterations completed, sweeps in the latest outer iteration
-        all_blocks_solved = False # every block has solved once, so _optimality() can be evaluated
 
-        # tolerance phases: each phase runs outer iterations with its own inner loop
-        # optimality tolerance until feasibility reaches feas_tol, then moves on to the next
-        for phase, opt_tol in enumerate(self.opt_tol, start=1):
-            final_phase = phase == num_phases
+        for phase, opt_tol in enumerate(self.opt_tol, start=1):  # tolerance phases
 
             # augmented Lagrangian outer loop
-            for k in outer_iters:
+            # for k in outer_iters:
+            while k < self.max_outer_iter:
+                k += 1
 
-                # BCD inner loop (sweeps counted from 1)
+                # BCD inner loop
                 for j in range(1, self.max_inner_iter + 1):
 
-                    for i, sub in enumerate(self.subproblems):
+                    for sub in self.subproblems:
 
                         self._set_inputs(sub)
-                        if not self.unconstrained:
-                            sub.outputs["phi"] = None # cleared so a solve() that doesn't set phi is caught
                         sub.solve(sub.inputs, sub.outputs)
                         self._get_outputs(sub)
 
-                        if self.save:
-                            self.history.append(self.x.copy())
-                            # initial=0 gives an empty (unconstrained) phi a feasibility of 0
-                            self.feas_history.append(float(np.max(np.abs(self.phi), initial=0.0)))
-                            # residual() may need data a block caches when it solves, so the
-                            # optimality is undefined until every block has solved once
-                            ready = all_blocks_solved or i == len(self.subproblems) - 1
-                            self.opt_history.append(self._optimality() if ready else np.nan)
+                        self.history.append(self.x.copy())
 
-                    all_blocks_solved = True
+                        # ready = all_blocks_solved or i == len(self.subproblems) - 1
+                        # self.opt_history.append(self._optimality() if ready else np.nan)
+                        # self.opt_history.append(self._optimality())
 
-                    # max-norm KKT stationarity residual over all subproblem blocks, at the
-                    # end of the sweep -- the last value recorded above, when saving
-                    opt_res = self.opt_history[-1] if self.save else self._optimality()
+                        # if self.save:
+                        #     self.history.append(self.x.copy())
+                        #     # initial=0 gives an empty (unconstrained) phi a feasibility of 0
+                        #     self.feas_history.append(float(np.max(np.abs(self.phi), initial=0.0)))
+                        #     # residual() may need data a block caches when it solves, so the
+                        #     # optimality is undefined until every block has solved once
+                        #     ready = all_blocks_solved or i == len(self.subproblems) - 1
+                        #     self.opt_history.append(self._optimality() if ready else np.nan)
 
-                    if self.verbose:
-                        print(f'outer {k:3d} | sweep {j:3d} | opt_res {opt_res:.3e}')
+                        self.feas_log.append(float(np.max(np.abs(self.phi), initial=0.0)))
 
-                    if opt_res <= opt_tol:
+                    res = self._optimality()  # get the current optimality residual
+                    self.opt_log.append(res)
+
+                    log(f'outer {k:3d} | sweep {j:3d} | opt_res {res:.3e}')
+
+                    if res <= opt_tol:
                         break
 
-                # unconstrained: there are no coupling constraints to enforce, so the
-                # BCD inner loop is the whole solve and the outer loop stops here
-                if self.unconstrained:
-                    self.success = opt_res <= opt_tol
-                    break
 
+                feas = np.max(np.abs(self.phi), initial=0.0)  # 0 when unconstrained
 
-                # the last subproblem solved in the sweep evaluated phi at the current x
-                c_new = self.phi
-                feas = np.max(np.abs(c_new))
-
-                if self.verbose:
-                    print(f'outer {k:3d} | feas {feas:.3e} | max mu {np.max(self.mu):.3e} | |y| {np.linalg.norm(self.y):.3e}')
+                log(f'outer {k:3d} | feas {feas:.3e} | max mu {np.max(self.mu):.3e} | |y| {np.linalg.norm(self.y):.3e}')
 
                 # feasible in the final phase: stop, and skip the multiplier update.
                 # success also requires the last inner loop to have reached opt_tol
-                if feas <= self.feas_tol and final_phase:
-                    self.success = opt_res <= opt_tol
-                    break
+                if feas <= self.feas_tol and phase == len(self.opt_tol):
+                    self.success = res <= opt_tol
+                    break  # converged
 
                 # update the multipliers (elementwise), then clip to the magnitude bound
-                self.y += self.mu * c_new
-                np.clip(self.y, -self.max_y, self.max_y, out=self.y)
+                self.y = np.clip(self.y + self.mu * self.phi, -self.max_y, self.max_y)
+                self._update_mu(self.phi, phi_old)
+                phi_old = self.phi
 
-                # update mu on a per-scalar-constraint basis
-                self._update_mu(c_new, c_old)
-                c_old = c_new
-
-                # feasible in an intermediate phase: move on to the next opt_tol
                 if feas <= self.feas_tol:
-                    if self.verbose:
-                        print(f'Phase {phase} complete, starting phase {phase + 1}')
-                    break
+                    log(f'Phase {phase} complete, starting phase {phase + 1}')
+                    break  # next phase
 
         self.tf = time.perf_counter() - t0
-        if self.verbose:
-            iters = f'{j} sweeps' if self.unconstrained else f'{k} outer iterations'
-            print(f"{'Converged' if self.success else 'Did not converge'} after {iters} ({self.tf:.2f} s)")
+        iters = f'{j} sweeps' if self.unconstrained else f'{k} outer iterations'
+        log(f"{'Converged' if self.success else 'Did not converge'} after {iters} ({self.tf:.2f} s)")
         return self
