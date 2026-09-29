@@ -1,3 +1,5 @@
+# Distribution Statement A. Approved for public release: distribution is unlimited. Approved AFRL-2026-1671 28-09-2026.
+
 """Same problem as rosenbrock_consensus.py, with a proximal term 0.5 * tau * ||v - v_k||^2
 added to each block's subproblem.
 

@@ -1,3 +1,5 @@
+# Distribution Statement A. Approved for public release: distribution is unlimited. Approved AFRL-2026-1671 28-09-2026.
+
 """Quadratic objective with a nonlinear inequality coupling two blocks:
 
     min x1^2 + x2^2 - 1.5 x1 x2  s.t.  x1^2 + x2^2 >= 0.25

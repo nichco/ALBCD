@@ -1,3 +1,5 @@
+# Distribution Statement A. Approved for public release: distribution is unlimited. Approved AFRL-2026-1671 28-09-2026.
+
 """Same problem as quadratic_global_linear.py, with each block solved by CVXOPT using exact
 Hessians.
 

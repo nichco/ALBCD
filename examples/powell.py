@@ -1,3 +1,5 @@
+# Distribution Statement A. Approved for public release: distribution is unlimited. Approved AFRL-2026-1671 28-09-2026.
+
 """Powell's example of block coordinate descent failing on an unconstrained problem:
 
     min -x1 x2 - x2 x3 - x1 x3 + sum_i (max(xi - 1, 0)^2 + max(-xi - 1, 0)^2)

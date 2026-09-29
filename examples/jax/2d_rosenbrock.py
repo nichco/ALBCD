@@ -1,3 +1,5 @@
+# Distribution Statement A. Approved for public release: distribution is unlimited. Approved AFRL-2026-1671 28-09-2026.
+
 """Unconstrained two-dimensional Rosenbrock function (with coefficient 1 instead of 100):
 
     min (1 - x1)^2 + (x2 - x1^2)^2

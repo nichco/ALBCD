@@ -1,3 +1,5 @@
+# Distribution Statement A. Approved for public release: distribution is unlimited. Approved AFRL-2026-1671 28-09-2026.
+
 """Consensus form of the Rosenbrock function with the constraint x1^2 + x2^2 >= 0.25.
 
 Each block owns a copy of (x1, x2) and handles the circle constraint locally; the

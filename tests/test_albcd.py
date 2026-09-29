@@ -60,7 +60,7 @@ def test_converges_to_known_solution(opt_tol):
     np.testing.assert_allclose(opt.x, [(A + B) / 2] * 2, atol=1e-7)
     np.testing.assert_allclose(opt.y, [A - B], atol=1e-6)
     assert np.max(np.abs(opt.phi)) <= opt.feas_tol
-    assert opt.feas_history[-1] <= opt.feas_tol
+    assert opt.feas_log[-1] <= opt.feas_tol
     assert opt.tf > 0
 
 
@@ -91,17 +91,11 @@ def test_history():
     np.testing.assert_array_equal(opt.history[-1], opt.x)
     assert (len(opt.history) - 1) % 2 == 0  # one entry per subproblem solve
 
-    # feasibility and optimality are recorded per subproblem solve too, so both line
-    # up with history once its leading x0 is dropped
-    assert len(opt.feas_history) == len(opt.opt_history) == len(opt.history) - 1
-    np.testing.assert_allclose(opt.feas_history[-1], np.max(np.abs(opt.phi)))
-    assert opt.opt_history[-1] <= opt.opt_tol[-1]  # the inner loop stops on this value
-    assert np.isnan(opt.opt_history[0])  # undefined until every block has solved once
-    assert np.all(np.isfinite(opt.opt_history[1:]))
-
-    opt = make_solver(save=False)
-    opt.solve()
-    assert opt.history == [] and opt.feas_history == [] and opt.opt_history == []
+    # feasibility and optimality are logged once per sweep (here, every two block solves)
+    assert len(opt.feas_log) == len(opt.opt_log) == (len(opt.history) - 1) // 2
+    np.testing.assert_allclose(opt.feas_log[-1], np.max(np.abs(opt.phi)))
+    assert opt.opt_log[-1] <= opt.opt_tol[-1]  # the inner loop stops on this value
+    assert np.all(np.isfinite(opt.opt_log))
 
 
 def test_data_exchange():
@@ -221,28 +215,29 @@ def test_unconstrained(capsys):
     assert opt.success
     np.testing.assert_allclose(opt.x, [(4 * A - 2 * B) / 3, (4 * B - 2 * A) / 3], atol=1e-9)
     assert opt.y.size == opt.mu.size == opt.phi.size == 0
-    np.testing.assert_array_equal(opt.opt_tol, [1e-10])  # a single phase with the final tolerance
-    assert opt.feas_history == [0.0] * (len(opt.history) - 1)
+    np.testing.assert_array_equal(opt.opt_tol, [1e-2, 1e-10])  # the phases are kept
+    assert opt.feas_log == [0.0] * len(opt.opt_log)
+    assert len(opt.opt_log) == (len(opt.history) - 1) // 2  # one entry per sweep
 
-    # the BCD inner loop only: one line per sweep of the single outer iteration
+    # nothing to make feasible, so each phase is one outer iteration of BCD sweeps
     lines = capsys.readouterr().out.splitlines()
-    n = len(lines) - 1
-    assert all(line.startswith("outer   1 | sweep") for line in lines[:-1])
-    assert lines[-1].startswith(f"Converged after {n} sweeps")
+    assert sum("| feas " in line for line in lines) == 2
+    assert "Phase 1 complete, starting phase 2" in lines
+    assert lines[-1].startswith("Converged after")
 
 
 def test_unconstrained_powell():
     """Powell (1973): exact cyclic coordinate descent cycles instead of converging."""
     eps = 0.01
     opt = ALBCD([PowellBlock(i) for i in range(3)], x0=[-1 - eps, 1 + eps / 2, -1 - eps / 4],
-                unconstrained=True, max_inner_iter=6, verbose=False)
+                unconstrained=True, opt_tol=1e-5, max_inner_iter=6, verbose=False)
     opt.solve()
     assert not opt.success
-    assert len(opt.history) == 1 + 6 * 3  # max_inner_iter bounds the whole solve
+    assert len(opt.history) == 1 + 6 * 3  # a single phase, so max_inner_iter bounds the whole solve
     # after six block solves the iterate is back near x0, its perturbation shrunk 64-fold,
     np.testing.assert_allclose(opt.history[6], [-1 - eps / 64, 1 + eps / 128, -1 - eps / 256], rtol=1e-12)
     # yet the gradient on this cycle does not vanish
-    assert opt.opt_history[-1] > 1.9
+    assert opt.opt_log[-1] > 1.9
 
 
 def test_unconstrained_rejects_phi():

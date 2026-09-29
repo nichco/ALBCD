@@ -336,17 +336,16 @@ print(f"Max coupling constraint violation: {np.max(np.abs(opt.phi)):.2e}")
 print(f"Discipline evaluations: {models.evaluations.analyses} analyses, {models.evaluations.derivatives} derivatives")
 
 
-# optimality and feasibility after every subproblem solve.
-# Optimality oscillates because solving one block leaves the others non-stationary.
-iterations = np.arange(1, len(opt.feas_history) + 1)  # opt_history[0] is nan; see ALBCD.opt_history
+# optimality and feasibility after every sweep.
+iterations = np.arange(1, len(opt.feas_log) + 1)
 
 fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(8, 2.25))
-ax1.semilogy(iterations, opt.opt_history, color='tab:blue', linewidth=2)
+ax1.semilogy(iterations, opt.opt_log, color='tab:blue', linewidth=2)
 ax1.set_xlabel('Iteration')
 ax1.set_ylabel('Optimality')
 ax1.grid(color='lavender', alpha=0.5, axis='y')
 
-ax2.semilogy(iterations, opt.feas_history, color='tab:orange', linewidth=2)
+ax2.semilogy(iterations, opt.feas_log, color='tab:orange', linewidth=2)
 ax2.set_xlabel('Iteration')
 ax2.set_ylabel('Feasibility')
 ax2.grid(color='lavender', alpha=0.5, axis='y')

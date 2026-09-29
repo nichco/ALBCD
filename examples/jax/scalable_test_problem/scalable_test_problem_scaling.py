@@ -45,7 +45,7 @@ CASES = sorted({(N, 10, 20) for N in (2, 4, 8, 16, 32)}
 
 # the same settings and tolerances for every case
 SETTINGS = dict(max_mu=1e3, rho=1.2, tau=0.5, feas_tol=1e-6, opt_tol=[1e-2, 1e-5],
-                max_outer_iter=200, max_inner_iter=100, save=False, verbose=False)
+                max_outer_iter=200, max_inner_iter=100, verbose=False)
 
 
 def solve_case(N, n0, ni):
