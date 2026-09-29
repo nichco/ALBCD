@@ -227,33 +227,17 @@ class ALBCD():
         return None
 
 
-    def _optimality(self) -> float:
-        """Max-norm KKT stationarity residual over all subproblem blocks at the current x."""
-        # refresh every subproblem's inputs to the current state before checking
-        # optimality -- a subproblem's own inputs may be stale relative to blocks
-        # that moved after it
-        for sub in self.subproblems:
-            self._set_inputs(sub)
-
-        return max(sub.residual(sub.inputs) for sub in self.subproblems)
-
-
     def solve(self) -> "ALBCD":
 
         t0 = time.perf_counter()
         log = print if self.verbose else lambda *args: None
         self.success = False
-        phi_old = np.full_like(self.mu, np.inf)  # no penalty grows on the first outer iteration
-
-        # a single outer iteration counter (counted from 1) shared by all phases, so each phase
-        # resumes where the previous one stopped and max_outer_iter bounds the whole solve
-        # outer_iters = iter(range(1, self.max_outer_iter + 1))
-        k = j = 0 # outer iterations completed, sweeps in the latest outer iteration
+        phi_old = np.full_like(self.mu, np.inf)  # no penalty parameter grows on the first outer iteration
+        k = 0
 
         for phase, opt_tol in enumerate(self.opt_tol, start=1):  # tolerance phases
 
             # augmented Lagrangian outer loop
-            # for k in outer_iters:
             while k < self.max_outer_iter:
                 k += 1
 
@@ -283,7 +267,9 @@ class ALBCD():
 
                         self.feas_log.append(float(np.max(np.abs(self.phi), initial=0.0)))
 
-                    res = self._optimality()  # get the current optimality residual
+                    # res = self._optimality()  # get the current optimality residual
+                    for sub in self.subproblems: self._set_inputs(sub) # refresh stale inputs
+                    res = max(sub.residual(sub.inputs) for sub in self.subproblems)
                     self.opt_log.append(res)
 
                     log(f'outer {k:3d} | sweep {j:3d} | opt_res {res:.3e}')
