@@ -146,10 +146,10 @@ else:
     error = None
     print(f"No monolithic solution for N = {N}; run monolithic.py to create it.")
 
-# convergence data, for plotting without rerunning the solve. opt_log and feas_log have one
+# convergence data, for plotting without rerunning the solve. opt_history and feas_history have one
 # entry per sweep; error has one per subproblem solve, and a leading entry for x0
 np.savez(os.path.join(HERE, f"convergence_N{N}.npz"),
-         opt_history=opt.opt_log, feas_history=opt.feas_log,
+         opt_history=opt.opt_history, feas_history=opt.feas_history,
          error=np.array([]) if error is None else error,
          opt_tol=opt.opt_tol, feas_tol=opt.feas_tol, x=opt.x, success=opt.success, time=opt.tf)
 
@@ -175,7 +175,7 @@ ax[0].set_xlabel("Subproblem solve")
 ax[0].set_ylabel("Relative error")
 ax[0].grid(color="lavender", alpha=0.5, axis="y")
 
-ax[1].semilogy(opt.feas_log, linewidth=2, color="tab:orange")
+ax[1].semilogy(opt.feas_history, linewidth=2, color="tab:orange")
 ax[1].axhline(opt.feas_tol, color="gray", linewidth=1, linestyle="--", alpha=0.8)
 ax[1].set_xlabel("Sweep")
 ax[1].set_ylabel("Feasibility")

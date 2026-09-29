@@ -9,9 +9,9 @@ class Subproblem:
     """Base class for one block of an ALBCD problem.
 
     Subclasses implement :meth:`setup`, :meth:`solve` and :meth:`residual`.
-    The solver passes ``x``, ``y`` and ``mu`` as inputs. Any other declared
-    input is read from the solver's ``data`` dictionary, and any extra output
-    is written back to it, so blocks can exchange additional quantities.
+    The solver passes ``x``, ``y``, ``mu`` and every entry of its ``data``
+    dictionary as inputs, and writes any output other than ``x`` and ``phi``
+    back to ``data``, so blocks can exchange additional quantities.
 
     Parameters
     ----------
@@ -29,8 +29,7 @@ class Subproblem:
     def setup(self) -> None:
         """Declare inputs and outputs with :meth:`add_input` and :meth:`add_output`.
 
-        Outputs ``"x"`` and ``"phi"`` are required, except that an unconstrained
-        problem (``ALBCD(..., unconstrained=True)``) has no ``"phi"``.
+        The declarations document the block's interface; ALBCD doesn't read them.
         """
         raise NotImplementedError
 

@@ -64,7 +64,7 @@ class ALBCD():
         Print per-iteration diagnostics.
     unconstrained : bool
         The problem has no coupling constraints, so ``mu0`` is omitted and no
-        subproblem declares the ``"phi"`` output. Only block coordinate
+        subproblem sets the ``"phi"`` output. Only block coordinate
         descent runs, once per ``opt_tol`` phase (``max_outer_iter`` still
         bounds the number of phases); ``max_mu``, ``rho``, ``tau``,
         ``feas_tol`` and ``max_y`` are unused.
@@ -83,12 +83,12 @@ class ALBCD():
         Extra inputs/outputs shared between subproblems.
     history : list of ndarray
         ``x0`` followed by ``x`` after every subproblem solve.
-    feas_log : list of float
+    feas_history : list of float
         ``max|phi|`` after every sweep (0 when unconstrained).
-    opt_log : list of float
+    opt_history : list of float
         Max-norm KKT stationarity residual over all blocks after every sweep,
         the value the inner loop compares with ``opt_tol``. Aligned with
-        ``feas_log``: entry ``i`` of both describes the ``i``-th sweep.
+        ``feas_history``: entry ``i`` of both describes the ``i``-th sweep.
     tf : float
         Wall-clock time of :meth:`solve` in seconds.
     """
@@ -113,7 +113,7 @@ class ALBCD():
 
         self.subproblems = subproblems
         self.x = np.array(x0, dtype=float) # copy, so the caller's x0 is never modified
-        self.data = {} if data0 is None else dict(data0) # extra inputs/outputs shared between subproblems; never holds x, y, mu or phi
+        self.data = {} if data0 is None else dict(data0) # other quantities shared between subproblems; never holds x, y, mu or phi
         self.tf = None
         self.unconstrained = unconstrained
 
@@ -122,17 +122,6 @@ class ALBCD():
             raise ValueError('mu0 must be omitted when unconstrained=True')
         if not unconstrained and (mu0 is None or np.size(mu0) == 0):
             raise ValueError('mu0 needs one entry per coupling constraint; set unconstrained=True if there are none')
-
-        # every subproblem reports the coupling constraints ("phi") at the x it returns,
-        # so the algorithm needs no separate constraint function. An unconstrained
-        # problem has none, so its subproblems must not declare "phi"
-        required = {"x"} if unconstrained else {"x", "phi"}
-        for sub in self.subproblems:
-            missing = required - sub.outputs.keys()
-            if missing:
-                raise ValueError(f'{type(sub).__name__} must declare outputs {sorted(missing)} in setup()')
-            if unconstrained and "phi" in sub.outputs:
-                raise ValueError(f'{type(sub).__name__} declares output "phi", but unconstrained=True')
 
         # force float dtype; an integer-dtype mu would otherwise truncate penalty growth.
         # Unconstrained, mu (and with it y and phi) is empty
@@ -157,8 +146,8 @@ class ALBCD():
         self.max_y = max_y
         self.verbose = verbose
         self.history = [self.x.copy()]
-        self.feas_log = [] # feasibility (max constraint violation) after each sweep
-        self.opt_log = []  # optimality (max-norm KKT residual) after each sweep
+        self.feas_history = [] # feasibility (max constraint violation) after each sweep
+        self.opt_history = []  # optimality (max-norm KKT residual) after each sweep
         self.y = np.zeros_like(self.mu) # Lagrange multipliers, one per coupling constraint
         self.phi = np.zeros(0) if unconstrained else None # coupling constraints at the current x, from the latest subproblem solve
         self.success = False # set by solve()
@@ -171,42 +160,6 @@ class ALBCD():
         f_old = np.abs(c_old)
         grow = (f_new > self.tau * f_old) & (f_new > self.feas_tol)
         self.mu[grow] = np.minimum(self.rho * self.mu[grow], self.max_mu)
-
-        return None
-
-
-    def _set_inputs(self, subproblem) -> None:
-        """Pass the current x, y, mu and any declared data entries to a subproblem."""
-        subproblem.inputs["x"] = self.x
-        subproblem.inputs["y"] = self.y
-        subproblem.inputs["mu"] = self.mu
-
-        # any other declared input comes from the data dictionary
-        for name in subproblem.inputs.keys() - {"x", "y", "mu"}:
-            subproblem.inputs[name] = self.data[name]
-
-        return None
-
-
-    def _get_outputs(self, subproblem) -> None:
-        """Read x, phi and any extra outputs back from a solved subproblem."""
-        self.x = subproblem.outputs["x"]
-
-        # phi: the coupling constraints evaluated at the x this subproblem just returned.
-        # np.array copies it, so a subproblem that reuses its output array can't alter c_old.
-        # Unconstrained subproblems have no phi, so it stays empty
-        if not self.unconstrained:
-            if subproblem.outputs["phi"] is None:
-                raise RuntimeError(f'{type(subproblem).__name__}.solve() did not set outputs["phi"]')
-            phi = np.array(subproblem.outputs["phi"], dtype=float)
-            if phi.shape != self.mu.shape:
-                raise ValueError(f'{type(subproblem).__name__}: outputs["phi"] has shape {phi.shape}, '
-                                 f'expected {self.mu.shape} (one entry per penalty parameter in mu0)')
-            self.phi = phi
-
-        # any other declared output goes into the data dictionary
-        for name in subproblem.outputs.keys() - {"x", "phi"}:
-            self.data[name] = subproblem.outputs[name]
 
         return None
 
@@ -230,17 +183,20 @@ class ALBCD():
 
                     for sub in self.subproblems:
 
-                        self._set_inputs(sub)
-                        sub.solve(sub.inputs, sub.outputs)
-                        self._get_outputs(sub)
+                        outputs = {}
+                        sub.solve(dict(self.data, x=self.x, y=self.y, mu=self.mu), outputs)
+                        self.x = outputs.pop("x")
+                        # phi at the new x; none when unconstrained. A missing or wrong-sized phi fails the reshape
+                        self.phi = np.array(outputs.pop("phi", []), dtype=float).reshape(self.mu.shape)
+                        self.data.update(outputs)  # any other output is shared through data
 
                         self.history.append(self.x.copy())
 
-                    self.feas_log.append(float(np.max(np.abs(self.phi), initial=0.0)))
+                    self.feas_history.append(float(np.max(np.abs(self.phi), initial=0.0)))
 
-                    for sub in self.subproblems: self._set_inputs(sub) # refresh stale inputs
-                    res = max(sub.residual(sub.inputs) for sub in self.subproblems)
-                    self.opt_log.append(res)
+                    inputs = dict(self.data, x=self.x, y=self.y, mu=self.mu)
+                    res = max(sub.residual(inputs) for sub in self.subproblems)
+                    self.opt_history.append(res)
 
                     log(f'outer {k:3d} | sweep {j:3d} | opt_res {res:.3e}')
 

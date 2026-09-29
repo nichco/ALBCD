@@ -265,17 +265,17 @@ plt.tight_layout()
 
 
 # optimality and feasibility after every sweep, with their tolerances.
-iterations = np.arange(1, len(opt.feas_log) + 1)
+iterations = np.arange(1, len(opt.feas_history) + 1)
 
 fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(8, 2.5))
-ax1.semilogy(iterations, opt.opt_log, color='tab:blue', linewidth=2)
+ax1.semilogy(iterations, opt.opt_history, color='tab:blue', linewidth=2)
 # ax1.axhline(opt.opt_tol[-1], color='tab:gray', linewidth=1, linestyle='--', alpha=0.5)
 # ax1.annotate('Tolerance', xy=(0.3, opt.opt_tol[-1]), xycoords=('axes fraction', 'data'), xytext=(0, 3), textcoords='offset points', ha='center', color='tab:gray', fontsize=8)
 ax1.set_xlabel('Iteration')
 ax1.set_ylabel('Optimality')
 ax1.grid(color='lavender', alpha=0.5, axis='y')
 
-ax2.semilogy(iterations, opt.feas_log, color='tab:orange', linewidth=2)
+ax2.semilogy(iterations, opt.feas_history, color='tab:orange', linewidth=2)
 # ax2.axhline(opt.feas_tol, color='tab:gray', linewidth=1, linestyle='--', alpha=0.5)
 # ax2.annotate('Tolerance', xy=(0.3, opt.feas_tol), xycoords=('axes fraction', 'data'), xytext=(0, 3), textcoords='offset points', ha='center', color='tab:gray', fontsize=8)
 ax2.set_xlabel('Iteration')

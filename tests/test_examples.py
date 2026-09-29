@@ -56,4 +56,4 @@ def test_powell():
     assert not opt.success
     assert len(opt.history) == 1 + 6 * 3  # max_inner_iter = 6 sweeps over 3 blocks
     np.testing.assert_allclose(np.abs(opt.x), 1, atol=1e-3)  # near a vertex of [-1, 1]^3 ...
-    assert opt.opt_log[-1] > 1.9  # ... where the gradient does not vanish
+    assert opt.opt_history[-1] > 1.9  # ... where the gradient does not vanish

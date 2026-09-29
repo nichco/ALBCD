@@ -287,18 +287,18 @@ plt.tight_layout()
 
 # optimality and feasibility after every subproblem solve, with their tolerances.
 # Optimality oscillates because solving one block leaves the other non-stationary.
-feas_iter = np.arange(1, len(opt.feas_log) + 1)
-opt_iter = np.arange(1, len(opt.opt_log) + 1)
+feas_iter = np.arange(1, len(opt.feas_history) + 1)
+opt_iter = np.arange(1, len(opt.opt_history) + 1)
 
 fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(8, 2.25))
-ax1.semilogy(opt_iter, opt.opt_log, color='tab:blue', linewidth=2)
+ax1.semilogy(opt_iter, opt.opt_history, color='tab:blue', linewidth=2)
 # ax1.axhline(opt.opt_tol[-1], color='tab:gray', linewidth=1, linestyle='--', alpha=0.5)
 # ax1.annotate('Tolerance', xy=(0.3, opt.opt_tol[-1]), xycoords=('axes fraction', 'data'), xytext=(0, 3), textcoords='offset points', ha='center', color='tab:gray', fontsize=8)
 ax1.set_xlabel('Iteration')
 ax1.set_ylabel('Optimality')
 ax1.grid(color='lavender', alpha=0.5, axis='y')
 
-ax2.semilogy(feas_iter, opt.feas_log, color='tab:orange', linewidth=2)
+ax2.semilogy(feas_iter, opt.feas_history, color='tab:orange', linewidth=2)
 # ax2.axhline(opt.feas_tol, color='tab:gray', linewidth=1, linestyle='--', alpha=0.5)
 # ax2.annotate('Tolerance', xy=(0.3, opt.feas_tol), xycoords=('axes fraction', 'data'), xytext=(0, 3), textcoords='offset points', ha='center', color='tab:gray', fontsize=8)
 ax2.set_xlabel('Iteration')
@@ -319,6 +319,6 @@ plt.show()
 
 
 # np.savez(os.path.join(HERE, 'aerostruct_albcd_rho1.2.npz'),
-#          opt_log=opt.opt_log,
-#          feas_log=opt.feas_log,
+#          opt_history=opt.opt_history,
+#          feas_history=opt.feas_history,
 #          error=error)

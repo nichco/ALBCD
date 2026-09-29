@@ -60,7 +60,7 @@ def test_converges_to_known_solution(opt_tol):
     np.testing.assert_allclose(opt.x, [(A + B) / 2] * 2, atol=1e-7)
     np.testing.assert_allclose(opt.y, [A - B], atol=1e-6)
     assert np.max(np.abs(opt.phi)) <= opt.feas_tol
-    assert opt.feas_log[-1] <= opt.feas_tol
+    assert opt.feas_history[-1] <= opt.feas_tol
     assert opt.tf > 0
 
 
@@ -92,10 +92,10 @@ def test_history():
     assert (len(opt.history) - 1) % 2 == 0  # one entry per subproblem solve
 
     # feasibility and optimality are logged once per sweep (here, every two block solves)
-    assert len(opt.feas_log) == len(opt.opt_log) == (len(opt.history) - 1) // 2
-    np.testing.assert_allclose(opt.feas_log[-1], np.max(np.abs(opt.phi)))
-    assert opt.opt_log[-1] <= opt.opt_tol[-1]  # the inner loop stops on this value
-    assert np.all(np.isfinite(opt.opt_log))
+    assert len(opt.feas_history) == len(opt.opt_history) == (len(opt.history) - 1) // 2
+    np.testing.assert_allclose(opt.feas_history[-1], np.max(np.abs(opt.phi)))
+    assert opt.opt_history[-1] <= opt.opt_tol[-1]  # the inner loop stops on this value
+    assert np.all(np.isfinite(opt.opt_history))
 
 
 def test_data_exchange():
@@ -136,21 +136,18 @@ def test_invalid_options(kwargs):
         make_solver(**kwargs)
 
 
-def test_missing_phi_output():
-    class NoPhi(Block):
-        def setup(self):
-            self.add_output("x")
-
-    with pytest.raises(ValueError, match="phi"):
-        make_solver(subproblems=[NoPhi(0, A), Block(1, B)])
-
-
 def test_phi_not_set():
     class ForgetsPhi(Block):
-        def solve(self, inputs, outputs):
-            outputs["x"] = inputs["x"]
+        """Sets phi on its first solve only."""
+        solves = 0
 
-    with pytest.raises(RuntimeError, match="phi"):
+        def solve(self, inputs, outputs):
+            super().solve(inputs, outputs)
+            self.solves += 1
+            if self.solves > 1:
+                del outputs["phi"]
+
+    with pytest.raises(ValueError, match="reshape"):
         make_solver(subproblems=[ForgetsPhi(0, A), Block(1, B)]).solve()
 
 
@@ -216,8 +213,8 @@ def test_unconstrained(capsys):
     np.testing.assert_allclose(opt.x, [(4 * A - 2 * B) / 3, (4 * B - 2 * A) / 3], atol=1e-9)
     assert opt.y.size == opt.mu.size == opt.phi.size == 0
     np.testing.assert_array_equal(opt.opt_tol, [1e-2, 1e-10])  # the phases are kept
-    assert opt.feas_log == [0.0] * len(opt.opt_log)
-    assert len(opt.opt_log) == (len(opt.history) - 1) // 2  # one entry per sweep
+    assert opt.feas_history == [0.0] * len(opt.opt_history)
+    assert len(opt.opt_history) == (len(opt.history) - 1) // 2  # one entry per sweep
 
     # nothing to make feasible, so each phase is one outer iteration of BCD sweeps
     lines = capsys.readouterr().out.splitlines()
@@ -237,9 +234,14 @@ def test_unconstrained_powell():
     # after six block solves the iterate is back near x0, its perturbation shrunk 64-fold,
     np.testing.assert_allclose(opt.history[6], [-1 - eps / 64, 1 + eps / 128, -1 - eps / 256], rtol=1e-12)
     # yet the gradient on this cycle does not vanish
-    assert opt.opt_log[-1] > 1.9
+    assert opt.opt_history[-1] > 1.9
 
 
 def test_unconstrained_rejects_phi():
-    with pytest.raises(ValueError, match="phi"):
-        ALBCD([Block(0, A), Block(1, B)], x0=np.zeros(2), unconstrained=True)
+    class WithPhi(QuadraticBlock):
+        def solve(self, inputs, outputs):
+            super().solve(inputs, outputs)
+            outputs["phi"] = np.zeros(1)
+
+    with pytest.raises(ValueError, match="reshape"):
+        ALBCD([WithPhi(0), WithPhi(1)], x0=np.zeros(2), unconstrained=True).solve()

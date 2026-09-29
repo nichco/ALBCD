@@ -48,11 +48,17 @@ class ErrorTerminatedALBCD(albcd.ALBCD):
         solution = np.load(path)
         self.exact = np.hstack([np.tile(solution["x0"], (N, 1)), solution["xs"]]).ravel() # [z_1, x_1, ..., z_N, x_N]
 
-    def _get_outputs(self, subproblem) -> None:
-        super()._get_outputs(subproblem)
-        self.solves += 1
-        if np.max(np.abs(self.x[:self.exact.size] - self.exact)) <= self.target:
-            raise TargetReached
+        for sub in self.subproblems:
+            sub.solve = self.checked(sub.solve)
+
+    def checked(self, solve):
+        """solve(), then stop once the solution error of the x it returns is at most the target."""
+        def wrapper(inputs, outputs):
+            solve(inputs, outputs)
+            self.solves += 1
+            if np.max(np.abs(outputs["x"][:self.exact.size] - self.exact)) <= self.target:
+                raise TargetReached
+        return wrapper
 
     def solve(self) -> None:
         try:
