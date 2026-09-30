@@ -25,18 +25,12 @@ warnings.filterwarnings("ignore")
 
 class Subproblem1(Subproblem):
 
-    def setup(self) -> None:
-        self.add_input("x")  # [x1, x2]
-        self.add_output("x") # no "phi" output: there are no coupling constraints
-
     def objective(self, v, other):
         x1 = v[0]
         x2 = other[0]
         return jnp.squeeze((1 - x1)**2 + (x2 - x1**2)**2)
 
-    def solve(self, inputs, outputs) -> None:
-        x = inputs["x"]
-
+    def solve(self, x, y, mu, data, outputs) -> None:
         v0 = np.asarray(self.decompose(x), dtype=float)
         other = jnp.asarray(self.other(x))
 
@@ -52,9 +46,7 @@ class Subproblem1(Subproblem):
 
         outputs["x"] = self.recompose(x, optimizer.results['x'])
 
-    def residual(self, inputs) -> float:
-
-        x = inputs["x"]
+    def residual(self, x, y, mu, data) -> float:
 
         v = jnp.asarray(self.decompose(x))
         other = jnp.asarray(self.other(x))
@@ -66,18 +58,12 @@ class Subproblem1(Subproblem):
 
 class Subproblem2(Subproblem):
 
-    def setup(self) -> None:
-        self.add_input("x")  # [x1, x2]
-        self.add_output("x") # no "phi" output: there are no coupling constraints
-
     def objective(self, v, other):
         x2 = v[0]
         x1 = other[0]
         return jnp.squeeze((1 - x1)**2 + (x2 - x1**2)**2)
 
-    def solve(self, inputs, outputs) -> None:
-        x = inputs["x"]
-
+    def solve(self, x, y, mu, data, outputs) -> None:
         v0 = np.asarray(self.decompose(x), dtype=float)
         other = jnp.asarray(self.other(x))
 
@@ -90,9 +76,7 @@ class Subproblem2(Subproblem):
 
         outputs["x"] = self.recompose(x, optimizer.results['x'])
 
-    def residual(self, inputs) -> float:
-
-        x = inputs["x"]
+    def residual(self, x, y, mu, data) -> float:
 
         v = jnp.asarray(self.decompose(x))
         other = jnp.asarray(self.other(x))
@@ -114,7 +98,7 @@ opt.solve()
 print('Solution: ', opt.x)
 
 
-history = np.array(opt.history)
+history = np.array(opt.x_history)
 x1_history = history[:, 0]
 x2_history = history[:, 1]
 

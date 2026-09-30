@@ -51,12 +51,6 @@ class ScenarioSubproblem(Subproblem):
         super().__init__(slice(i * nv, (i + 1) * nv))
 
     def setup(self) -> None:
-        self.add_input("x")
-        self.add_input("y")  # Lagrange multipliers
-        self.add_input("mu") # penalty parameters
-        self.add_output("x")
-        self.add_output("phi") # coupling constraints at the new x
-
         # jit once. The inputs that change between solves (v, x, y, mu) are arguments of
         # the compiled functions, so every solve reuses the same compiled code
         self._obj = jax.jit(self.objective)
@@ -76,9 +70,8 @@ class ScenarioSubproblem(Subproblem):
     def local_constraints(self, v):
         return collocation(v, samples[self.i])
 
-    def solve(self, inputs, outputs) -> None:
-        x = inputs["x"]
-        args = tuple(jnp.asarray(a) for a in (x, inputs["y"], inputs["mu"]))
+    def solve(self, x, y, mu, data, outputs) -> None:
+        args = tuple(jnp.asarray(a) for a in (x, y, mu))
 
         prob = mo.ProblemLite(x0=np.array(self.decompose(x)),
                               obj=lambda v: float(self._obj(jnp.asarray(v), *args)),
@@ -98,9 +91,8 @@ class ScenarioSubproblem(Subproblem):
         outputs["x"] = self.recompose(x, v_new)
         outputs["phi"] = np.asarray(consensus(designs(outputs["x"])))
 
-    def residual(self, inputs) -> float:
-        x = inputs["x"]
-        args = tuple(jnp.asarray(a) for a in (x, inputs["y"], inputs["mu"]))
+    def residual(self, x, y, mu, data) -> float:
+        args = tuple(jnp.asarray(a) for a in (x, y, mu))
         v = self.decompose(x)
         grad_f = np.asarray(self._grad(jnp.asarray(v), *args))
 
@@ -138,7 +130,7 @@ if os.path.exists(reference):
     solution = np.load(reference)
     x_star = np.concatenate([np.concatenate([[solution["l"], solution["mp"]], solution["states"][i].ravel(), solution["u"][i]])
                              for i in range(N)])
-    error = np.linalg.norm(np.array(opt.history) - x_star, axis=1) / np.linalg.norm(x_star)
+    error = np.linalg.norm(np.array(opt.x_history) - x_star, axis=1) / np.linalg.norm(x_star)
     print(f"Monolithic: l {float(solution['l']):.4f} m, mp {float(solution['mp']):.4f} kg, "
           f"effort {float(solution['effort']):.2f}")
     print("Relative error: ", error[-1])

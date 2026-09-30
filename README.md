@@ -4,6 +4,8 @@
 
 **Augmented Lagrangian block coordinate descent**
 
+Documentation: [nichco.github.io/ALBCD](https://nichco.github.io/ALBCD/)
+
 Augmented Lagrangian block coordinate descent (ALBCD) is a coordination scheme for distributed
 multidisciplinary design optimization (MDO) problems. To use ALBCD, MDO problems are first decomposed into subproblems. These subproblems are formulated with relaxed constraints and a new augmemted Lagrangian merit function instead of the original objective function. The ALBCD coordination scheme iteratively solves each subproblem using the block coordinate descent algorithm in an inner loop, while an outer loop enforces the relaxed constraints using the augmented Lagrangian method. In some scenarios, ALBCD can be used to reduce computational cost and/or enable geographically distributed optimization.
 
@@ -57,22 +59,14 @@ class Subproblem1(Subproblem):
     xl = np.array([-np.inf, 0.0])
     xu = np.array([np.inf, np.inf])
 
-    def setup(self) -> None:
-        self.add_input("x")  # [x1, s, x2]
-        self.add_input("y")  # Lagrange multipliers
-        self.add_input("mu")  # penalty parameters
-        self.add_output("x")
-        self.add_output("phi")  # coupling constraints at the new x
-
     def objective(self, v, other, y, mu):
         """Augmented Lagrangian as a function of this block's variables v."""
         x1, s, x2 = v[0], v[1], other[0]
         c = phi(x1, s, x2)
         return f(x1, x2) + torch.sum(y * c) + 0.5 * torch.sum(mu * c**2)
 
-    def solve(self, inputs, outputs) -> None:
-        x = inputs["x"]
-        other, y, mu = (torch.as_tensor(a) for a in (self.other(x), inputs["y"], inputs["mu"]))
+    def solve(self, x, y, mu, data, outputs) -> None:
+        other, y, mu = (torch.as_tensor(a) for a in (self.other(x), y, mu))
         obj = lambda v: self.objective(torch.as_tensor(v), other, y, mu)
 
         prob = mo.ProblemLite(x0=self.decompose(x), obj=lambda v: float(obj(v)),
@@ -84,9 +78,8 @@ class Subproblem1(Subproblem):
         outputs["x"] = self.recompose(x, optimizer.results['x'])
         outputs["phi"] = np.array([phi(*outputs["x"])])
 
-    def residual(self, inputs) -> float:
+    def residual(self, x, y, mu, data) -> float:
         """Projected-gradient stationarity residual: zero iff v is a KKT point for xl <= v <= xu."""
-        x, y, mu = inputs["x"], inputs["y"], inputs["mu"]
         v = self.decompose(x)
         args = (torch.as_tensor(a) for a in (v, self.other(x), y, mu))
         grad = torch.func.grad(self.objective)(*args).numpy()
@@ -99,22 +92,14 @@ class Subproblem2(Subproblem):
     xl = np.array([-np.inf])
     xu = np.array([np.inf])
 
-    def setup(self) -> None:
-        self.add_input("x")  # [x1, s, x2]
-        self.add_input("y")  # Lagrange multipliers
-        self.add_input("mu")  # penalty parameters
-        self.add_output("x")
-        self.add_output("phi")  # coupling constraints at the new x
-
     def objective(self, v, other, y, mu):
         """Augmented Lagrangian as a function of this block's variables v."""
         x1, s, x2 = other[0], other[1], v[0]
         c = phi(x1, s, x2)
         return f(x1, x2) + torch.sum(y * c) + 0.5 * torch.sum(mu * c**2)
 
-    def solve(self, inputs, outputs) -> None:
-        x = inputs["x"]
-        other, y, mu = (torch.as_tensor(a) for a in (self.other(x), inputs["y"], inputs["mu"]))
+    def solve(self, x, y, mu, data, outputs) -> None:
+        other, y, mu = (torch.as_tensor(a) for a in (self.other(x), y, mu))
         obj = lambda v: self.objective(torch.as_tensor(v), other, y, mu)
 
         prob = mo.ProblemLite(x0=self.decompose(x), obj=lambda v: float(obj(v)),
@@ -126,9 +111,8 @@ class Subproblem2(Subproblem):
         outputs["x"] = self.recompose(x, optimizer.results['x'])
         outputs["phi"] = np.array([phi(*outputs["x"])])
 
-    def residual(self, inputs) -> float:
+    def residual(self, x, y, mu, data) -> float:
         """Projected-gradient stationarity residual: zero iff v is a KKT point for xl <= v <= xu."""
-        x, y, mu = inputs["x"], inputs["y"], inputs["mu"]
         v = self.decompose(x)
         args = (torch.as_tensor(a) for a in (v, self.other(x), y, mu))
         grad = torch.func.grad(self.objective)(*args).numpy()
@@ -149,9 +133,9 @@ print(opt.success, opt.x)  # True, approximately [0.354 0. 0.354]: x1 = x2 = sqr
 ### Unconstrained problems
 
 For a problem without coupling constraints, pass `unconstrained=True` and omit `mu0`.
-The subproblems then declare only the `"x"` output (no `"phi"`), and ALBCD reduces to
-block coordinate descent: it runs up to `max_inner_iter` sweeps until the residual reaches
-the final `opt_tol`, with no augmented Lagrangian outer loop or tolerance phases.
+The subproblems then set only `outputs["x"]` (no `"phi"`), and ALBCD reduces to
+block coordinate descent: each `opt_tol` phase runs up to `max_inner_iter` sweeps until the
+residual reaches that phase's tolerance, with no multiplier or penalty updates.
 Constraints local to a single block are still allowed. See
 [examples/powell.py](https://github.com/nichco/ALBCD/blob/main/examples/powell.py) and
 `2d_rosenbrock.py` (JAX and PyTorch).

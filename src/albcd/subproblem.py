@@ -8,10 +8,12 @@ import numpy as np
 class Subproblem:
     """Base class for one block of an ALBCD problem.
 
-    Subclasses implement :meth:`setup`, :meth:`solve` and :meth:`residual`.
-    The solver passes ``x``, ``y``, ``mu`` and every entry of its ``data``
-    dictionary as inputs, and writes any output other than ``x`` and ``phi``
-    back to ``data``, so blocks can exchange additional quantities.
+    Subclasses implement :meth:`solve` and :meth:`residual`, and can override
+    :meth:`setup` for one-time work such as compiling functions. The solver
+    passes both the current design vector ``x``, multipliers ``y``, penalty
+    parameters ``mu`` and its ``data`` dictionary, and writes any output of
+    :meth:`solve` other than ``x`` and ``phi`` into ``data``, so blocks can
+    exchange additional quantities.
 
     Parameters
     ----------
@@ -22,18 +24,12 @@ class Subproblem:
     def __init__(self, index):
         """Set up the subproblem and call :meth:`setup`. ``index`` is described above."""
         self.index = index # slice/array selecting this block's entries out of x
-        self.inputs = {}
-        self.outputs = {}
         self.setup()
 
     def setup(self) -> None:
-        """Declare inputs and outputs with :meth:`add_input` and :meth:`add_output`.
+        """Optional one-time setup, called by the constructor."""
 
-        The declarations document the block's interface; ALBCD doesn't read them.
-        """
-        raise NotImplementedError
-
-    def solve(self, inputs, outputs) -> None:
+    def solve(self, x, y, mu, data, outputs) -> None:
         """Minimize the augmented Lagrangian over this block with the other blocks fixed.
 
         Must set ``outputs["x"]``, the global design vector with this block's
@@ -44,17 +40,9 @@ class Subproblem:
         """
         raise NotImplementedError
 
-    def residual(self, inputs) -> float:
-        """Return the max-norm KKT stationarity residual of this block's subproblem at ``inputs``."""
+    def residual(self, x, y, mu, data) -> float:
+        """Return the max-norm KKT stationarity residual of this block's subproblem at ``x``."""
         raise NotImplementedError
-
-    def add_input(self, name) -> None:
-        """Declare an input named ``name``."""
-        self.inputs[name] = None
-
-    def add_output(self, name) -> None:
-        """Declare an output named ``name``."""
-        self.outputs[name] = None
 
     def decompose(self, x):
         """Convenience: this subproblem's own slice of the global x, via `index`."""

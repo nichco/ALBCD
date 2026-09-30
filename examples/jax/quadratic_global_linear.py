@@ -22,13 +22,6 @@ warnings.filterwarnings("ignore")
 
 class Subproblem1(Subproblem):
 
-    def setup(self) -> None:
-        self.add_input("x")  # [x1, s, x2]
-        self.add_input("y")  # Lagrange multipliers
-        self.add_input("mu") # penalty parameter(s)
-        self.add_output("x")
-        self.add_output("phi") # coupling constraints at the new x
-
     def objective(self, v, other, y, mu):
         x1 = v[0]
         s = v[1]
@@ -39,9 +32,7 @@ class Subproblem1(Subproblem):
 
         return obj + jnp.sum(y * g0) + 0.5 * jnp.sum(mu * g0**2)
 
-    def solve(self, inputs, outputs) -> None:
-        x, y, mu = inputs["x"], inputs["y"], inputs["mu"]
-
+    def solve(self, x, y, mu, data, outputs) -> None:
         v0 = np.asarray(self.decompose(x), dtype=float)
         other = jnp.asarray(self.other(x))
 
@@ -72,11 +63,7 @@ class Subproblem1(Subproblem):
         outputs["x"] = x_new
         outputs["phi"] = np.array([g0])
 
-    def residual(self, inputs) -> float:
-
-        x = inputs["x"]
-        y = inputs["y"]
-        mu = inputs["mu"]
+    def residual(self, x, y, mu, data) -> float:
 
         v = jnp.asarray(self.decompose(x))
         other = jnp.asarray(self.other(x))
@@ -94,13 +81,6 @@ class Subproblem1(Subproblem):
 
 class Subproblem2(Subproblem):
 
-    def setup(self) -> None:
-        self.add_input("x")  # [x1, s, x2]
-        self.add_input("y")  # Lagrange multipliers
-        self.add_input("mu") # penalty parameter(s)
-        self.add_output("x")
-        self.add_output("phi") # coupling constraints at the new x
-
     def objective(self, v, other, y, mu):
         x2 = v[0]
         x1, s = other[0], other[1]
@@ -110,9 +90,7 @@ class Subproblem2(Subproblem):
 
         return obj + jnp.sum(y * g0) + 0.5 * jnp.sum(mu * g0**2)
 
-    def solve(self, inputs, outputs) -> None:
-        x, y, mu = inputs["x"], inputs["y"], inputs["mu"]
-
+    def solve(self, x, y, mu, data, outputs) -> None:
         v0 = np.asarray(self.decompose(x), dtype=float)
         other = jnp.asarray(self.other(x))
 
@@ -139,11 +117,7 @@ class Subproblem2(Subproblem):
         outputs["x"] = x_new
         outputs["phi"] = np.array([g0])
 
-    def residual(self, inputs) -> float:
-
-        x = inputs["x"]
-        y = inputs["y"]
-        mu = inputs["mu"]
+    def residual(self, x, y, mu, data) -> float:
 
         v = jnp.asarray(self.decompose(x))
         other = jnp.asarray(self.other(x))
@@ -177,7 +151,7 @@ opt = ALBCD(subproblems=[Subproblem1(index=slice(0, 2)), # owns x1 and s
 opt.solve()
 
 
-history = np.array(opt.history)
+history = np.array(opt.x_history)
 x1_history = history[:, 0]
 s_history = history[:, 1]
 x2_history = history[:, 2]

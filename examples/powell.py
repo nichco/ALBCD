@@ -34,13 +34,7 @@ class CoordinateSubproblem(Subproblem):
     The function is symmetric, so one class serves all three blocks.
     """
 
-    def setup(self) -> None:
-        self.add_input("x")  # [x1, x2, x3]
-        self.add_output("x") # no "phi" output: there are no coupling constraints
-
-    def solve(self, inputs, outputs) -> None:
-        x = inputs["x"]
-
+    def solve(self, x, y, mu, data, outputs) -> None:
         # With the other two variables fixed and s their sum, the objective is -v s
         # plus the penalties on v, up to a constant: linear in v on [-1, 1] and
         # quadratic outside. It is minimized by v = 1 + s/2 for s > 0, by
@@ -50,9 +44,7 @@ class CoordinateSubproblem(Subproblem):
 
         outputs["x"] = self.recompose(x, v)
 
-    def residual(self, inputs) -> float:
-
-        x = inputs["x"]
+    def residual(self, x, y, mu, data) -> float:
 
         v = self.decompose(x)[0]
         s = np.sum(self.other(x))
@@ -77,11 +69,11 @@ opt = ALBCD(subproblems=[CoordinateSubproblem(index=slice(0, 1)),  # owns x1
 opt.solve()
 
 print('\nIterates (one per block solve)')
-for k, x in enumerate(opt.history):
+for k, x in enumerate(opt.x_history):
     print(f'{k:3d}  ' + '  '.join(f'{xi:+.8f}' for xi in x))
 
 
-history = np.array(opt.history)
+history = np.array(opt.x_history)
 
 plt.rcParams.update({'font.size': 14})
 fig = plt.figure(figsize=(7, 7))

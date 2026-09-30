@@ -49,25 +49,18 @@ def coupling(x):
 
 class Block(Subproblem):
 
-    def setup(self) -> None:
-        self.add_input("x")
-        self.add_input("y")  # Lagrange multipliers
-        self.add_input("mu") # penalty parameters
-        self.add_output("x")
-        self.add_output("phi") # coupling constraints at the new x
-
     def merit(self, v, x, y, mu):
         """Augmented Lagrangian over this block's variables v, with the other blocks fixed."""
         c = coupling(torch.cat([x[:self.index.start], v, x[self.index.stop:]]))
         return local_objective(v[:m]) + y @ c + 0.5 * mu @ c ** 2
 
-    def solve(self, inputs, outputs) -> None:
-        x, y, mu = (torch.as_tensor(inputs[name]) for name in ("x", "y", "mu"))
+    def solve(self, x, y, mu, data, outputs) -> None:
+        x, y, mu = (torch.as_tensor(a) for a in (x, y, mu))
         obj = lambda v: self.merit(v, x, y, mu)
         con = lambda v: local_constraint(v[:m])
 
         # modopt drives the solve with numpy callbacks; torch.func supplies the exact derivatives
-        prob = mo.ProblemLite(x0=np.array(self.decompose(inputs["x"])),
+        prob = mo.ProblemLite(x0=np.array(self.decompose(x)),
                               obj=lambda v: np.float64(obj(torch.as_tensor(v))),
                               grad=lambda v: np.array(torch.func.grad(obj)(torch.as_tensor(v))),
                               con=lambda v: np.array(con(torch.as_tensor(v))),
@@ -81,14 +74,14 @@ class Block(Subproblem):
         self._multiplier = np.asarray(optimizer.results['multipliers'])
         self._jac_con = np.array(torch.func.jacrev(con)(torch.as_tensor(v)))
 
-        x_new = self.recompose(inputs["x"], v)
+        x_new = self.recompose(x, v)
         outputs["x"] = x_new
         outputs["phi"] = np.array(coupling(torch.as_tensor(x_new)))
 
-    def residual(self, inputs) -> float:
+    def residual(self, x, y, mu, data) -> float:
         """Projected-gradient KKT residual, with the sphere constraint's multiplier and the bounds."""
-        x, y, mu = (torch.as_tensor(inputs[name]) for name in ("x", "y", "mu"))
-        v = np.array(self.decompose(inputs["x"]))
+        x, y, mu = (torch.as_tensor(a) for a in (x, y, mu))
+        v = np.array(self.decompose(x))
         grad = np.array(torch.func.grad(self.merit)(torch.as_tensor(v), x, y, mu))
         grad += self._jac_con.T @ self._multiplier
         return float(np.max(np.abs(v - np.clip(v - grad, xl[self.index], xu[self.index]))))

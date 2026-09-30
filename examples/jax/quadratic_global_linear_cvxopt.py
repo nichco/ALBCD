@@ -20,12 +20,6 @@ warnings.filterwarnings("ignore")
 class Subproblem1(Subproblem):
 
     def setup(self) -> None:
-        self.add_input("x")  # [x1, s, x2]
-        self.add_input("y")  # Lagrange multipliers
-        self.add_input("mu") # penalty parameter(s)
-        self.add_output("x")
-        self.add_output("phi") # coupling constraints at the new x
-
         # Jit objective/gradient/Hessian ONCE against `other`, `y`, `mu` as
         # traced arguments (not closure constants). Since this Subproblem
         # instance is reused for every BCD sweep and the argument shapes
@@ -46,9 +40,7 @@ class Subproblem1(Subproblem):
 
         return obj + jnp.sum(y * g0) + 0.5 * jnp.sum(mu * g0**2)
 
-    def solve(self, inputs, outputs) -> None:
-        x, y, mu = inputs["x"], inputs["y"], inputs["mu"]
-
+    def solve(self, x, y, mu, data, outputs) -> None:
         v0 = np.asarray(self.decompose(x), dtype=float)
         other = jnp.asarray(self.other(x))
 
@@ -84,11 +76,7 @@ class Subproblem1(Subproblem):
         outputs["x"] = x_new
         outputs["phi"] = np.array([g0])
 
-    def residual(self, inputs) -> float:
-
-        x = inputs["x"]
-        y = inputs["y"]
-        mu = inputs["mu"]
+    def residual(self, x, y, mu, data) -> float:
 
         v = jnp.asarray(self.decompose(x))
         other = jnp.asarray(self.other(x))
@@ -107,12 +95,6 @@ class Subproblem1(Subproblem):
 class Subproblem2(Subproblem):
 
     def setup(self) -> None:
-        self.add_input("x")  # [x1, s, x2]
-        self.add_input("y")  # Lagrange multipliers
-        self.add_input("mu") # penalty parameter(s)
-        self.add_output("x")
-        self.add_output("phi") # coupling constraints at the new x
-
         # See Subproblem1.setup(): jit ONCE and reuse the compiled
         # executable across every BCD sweep instead of retracing per call.
         self._obj_jit = jax.jit(self.objective)
@@ -128,9 +110,7 @@ class Subproblem2(Subproblem):
 
         return obj + jnp.sum(y * g0) + 0.5 * jnp.sum(mu * g0**2)
 
-    def solve(self, inputs, outputs) -> None:
-        x, y, mu = inputs["x"], inputs["y"], inputs["mu"]
-
+    def solve(self, x, y, mu, data, outputs) -> None:
         v0 = np.asarray(self.decompose(x), dtype=float)
         other = jnp.asarray(self.other(x))
 
@@ -162,11 +142,7 @@ class Subproblem2(Subproblem):
         outputs["x"] = x_new
         outputs["phi"] = np.array([g0])
 
-    def residual(self, inputs) -> float:
-
-        x = inputs["x"]
-        y = inputs["y"]
-        mu = inputs["mu"]
+    def residual(self, x, y, mu, data) -> float:
 
         v = jnp.asarray(self.decompose(x))
         other = jnp.asarray(self.other(x))
@@ -200,7 +176,7 @@ opt = ALBCD(subproblems=[Subproblem1(index=slice(0, 2)), # owns x1 and s
 opt.solve()
 
 
-history = np.array(opt.history)
+history = np.array(opt.x_history)
 x1_history = history[:, 0]
 s_history = history[:, 1]
 x2_history = history[:, 2]

@@ -58,12 +58,6 @@ class MissionSubproblem(Subproblem):
         super().__init__(slice(i * block_size, (i + 1) * block_size))
 
     def setup(self) -> None:
-        self.add_input("x")
-        self.add_input("y")  # Lagrange multipliers
-        self.add_input("mu") # penalty parameters
-        self.add_output("x")
-        self.add_output("phi") # coupling constraints at the new x
-
         # jit functions() and its Jacobian once. The inputs that change between solves (v, x,
         # y, mu) are arguments of the compiled functions rather than constants in a closure,
         # so every solve reuses the same compiled code instead of retracing the VLM
@@ -86,9 +80,8 @@ class MissionSubproblem(Subproblem):
         aug_lagrangian = 1e-5 * out["fuelburn"] / N + jnp.sum(y * c) + 0.5 * jnp.sum(mu * c**2)
         return jnp.stack([aug_lagrangian, out["L_equals_W"]])
 
-    def solve(self, inputs, outputs) -> None:
-        x = inputs["x"]
-        args = tuple(jnp.asarray(a) for a in (x, inputs["y"], inputs["mu"]))
+    def solve(self, x, y, mu, data, outputs) -> None:
+        args = tuple(jnp.asarray(a) for a in (x, y, mu))
         values = memoize_last(lambda v: np.asarray(self._values(jnp.asarray(v), *args)))
         derivs = memoize_last(lambda v: np.asarray(self._derivs(jnp.asarray(v), *args)))
 
@@ -110,9 +103,8 @@ class MissionSubproblem(Subproblem):
         fuelburns[self.i] = fuelburn(self.i, v_new[:num_twist_cp], v_new[-1])
         fuelburn_history.append(np.mean(fuelburns))
 
-    def residual(self, inputs) -> float:
-        x = inputs["x"]
-        args = tuple(jnp.asarray(a) for a in (x, inputs["y"], inputs["mu"]))
+    def residual(self, x, y, mu, data) -> float:
+        args = tuple(jnp.asarray(a) for a in (x, y, mu))
         v = self.decompose(x)
         # row 0 of the compiled Jacobian is the augmented Lagrangian's gradient
         grad_f = np.asarray(self._derivs(jnp.asarray(v), *args))[0]

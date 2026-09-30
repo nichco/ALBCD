@@ -88,11 +88,6 @@ def solve_case(N, n0, ni):
     class Block(Subproblem):
 
         def setup(self) -> None:
-            self.add_input("x")
-            self.add_input("y")  # Lagrange multipliers
-            self.add_input("mu") # penalty parameters
-            self.add_output("x")
-            self.add_output("phi") # coupling constraints at the new x
             self.analyzed = self.differentiated = None # last model inputs
 
         def count(self, v, derivative=False):
@@ -121,10 +116,10 @@ def solve_case(N, n0, ni):
             self.count(v, derivative=True)
             return np.array(jac_fn(v))
 
-        def solve(self, inputs, outputs) -> None:
-            args = tuple(jnp.asarray(inputs[name]) for name in ("x", "y", "mu"))
+        def solve(self, x, y, mu, data, outputs) -> None:
+            args = tuple(jnp.asarray(a) for a in (x, y, mu))
 
-            prob = mo.ProblemLite(x0=np.array(self.decompose(inputs["x"])),
+            prob = mo.ProblemLite(x0=np.array(self.decompose(x)),
                                   obj=lambda v: self.obj(v, *args),
                                   grad=lambda v: self.grad(v, *args),
                                   con=self.con, jac=self.jac,
@@ -140,14 +135,14 @@ def solve_case(N, n0, ni):
             self._multiplier = np.asarray(optimizer.results['multipliers'])
             self._jac_con = self.jac(v)
 
-            x_new = self.recompose(inputs["x"], v)
+            x_new = self.recompose(x, v)
             outputs["x"] = x_new
             outputs["phi"] = np.array(coupling(jnp.asarray(x_new)))
 
-        def residual(self, inputs) -> float:
+        def residual(self, x, y, mu, data) -> float:
             """Projected-gradient KKT residual, with the sphere constraint's multiplier and the bounds."""
-            v = np.array(self.decompose(inputs["x"]))
-            grad = self.grad(v, *(jnp.asarray(inputs[name]) for name in ("x", "y", "mu")))
+            v = np.array(self.decompose(x))
+            grad = self.grad(v, *(jnp.asarray(a) for a in (x, y, mu)))
             grad += self._jac_con.T @ self._multiplier
             return float(np.max(np.abs(v - np.clip(v - grad, xl[self.index], xu[self.index]))))
 
@@ -174,7 +169,7 @@ def solve_case(N, n0, ni):
     return dict(costs, wall_time=opt.tf, compile_time=compile_time, success=opt.success,
                 objective=float(sum(local_objective(wi) for wi in w)),
                 feasibility=float(np.max(np.abs(opt.phi))),
-                optimality=max(block.residual(dict(x=opt.x, y=opt.y, mu=opt.mu)) for block in blocks))
+                optimality=max(block.residual(opt.x, opt.y, opt.mu, opt.data) for block in blocks))
 
 
 results = []

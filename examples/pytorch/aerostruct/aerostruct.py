@@ -80,16 +80,6 @@ class AeroSubproblem(Subproblem):
     C_SCALER = 1e-2  # lift = weight_copy
     FTOL = 1e-8      # SLSQP tolerance
 
-    def setup(self) -> None:
-        self.add_input("x")
-        self.add_input("y")  # Lagrange multipliers
-        self.add_input("mu") # penalty parameters
-        self.add_input("weight")  # from StructSubproblem
-        self.add_output("x")
-        self.add_output("phi") # coupling constraints at the new x
-        self.add_output("aero_loads")  # to StructSubproblem
-        self.add_output("CD")
-
     def objective(self, v, other, y, mu, weight):
         twist_cp, weight_copy = v[:num_cp_twist], v[num_cp_twist]
         aero_loads_copy = other[num_cp_thickness:]
@@ -103,9 +93,8 @@ class AeroSubproblem(Subproblem):
         _, _, lift = aero_model(v[:num_cp_twist])
         return (lift - v[num_cp_twist]).reshape(1)
 
-    def solve(self, inputs, outputs) -> None:
-        x = inputs["x"]
-        other, y, mu, weight = (torch.as_tensor(a) for a in (self.other(x), inputs["y"], inputs["mu"], inputs["weight"]))
+    def solve(self, x, y, mu, data, outputs) -> None:
+        other, y, mu, weight = (torch.as_tensor(a) for a in (self.other(x), y, mu, data["weight"]))
 
         v_new, self._multipliers, self._jac_con = solve_slsqp(
             lambda v: self.objective(v, other, y, mu, weight), self.local_constraints,
@@ -121,10 +110,9 @@ class AeroSubproblem(Subproblem):
         outputs["phi"] = np.array(coupling(aero_loads, torch.as_tensor(x_new[LOADS_SLICE]),
                                            weight, torch.as_tensor(x_new[WEIGHT_SLICE][0])))
 
-    def residual(self, inputs) -> float:
-        x = inputs["x"]
+    def residual(self, x, y, mu, data) -> float:
         v, other, y, mu, weight = (torch.as_tensor(a) for a in (self.decompose(x), self.other(x),
-                                                                  inputs["y"], inputs["mu"], inputs["weight"]))
+                                                                  y, mu, data["weight"]))
         grad_f = np.array(torch.func.grad(self.objective)(v, other, y, mu, weight))
 
         # KKT stationarity with SLSQP's multipliers for the local constraint
@@ -150,15 +138,6 @@ class StructSubproblem(Subproblem):
     XL = np.concatenate([np.full(num_cp_thickness, min_gauge),      np.full(2 * num_nodes, -np.inf)])
     XU = np.concatenate([np.full(num_cp_thickness, float(r.min())), np.full(2 * num_nodes,  np.inf)])
 
-    def setup(self) -> None:
-        self.add_input("x")
-        self.add_input("y")  # Lagrange multipliers
-        self.add_input("mu") # penalty parameters
-        self.add_input("aero_loads")  # from AeroSubproblem
-        self.add_output("x")
-        self.add_output("phi") # coupling constraints at the new x
-        self.add_output("weight")  # to AeroSubproblem
-
     def objective(self, v, other, y, mu, aero_loads):
         thickness_cp, aero_loads_copy = v[:num_cp_thickness], v[num_cp_thickness:]
         weight_copy = other[num_cp_twist]
@@ -174,9 +153,8 @@ class StructSubproblem(Subproblem):
         return torch.stack([u_r - tip_disp_target,
                             u_l - tip_disp_target])
 
-    def solve(self, inputs, outputs) -> None:
-        x = inputs["x"]
-        other, y, mu, aero_loads = (torch.as_tensor(a) for a in (self.other(x), inputs["y"], inputs["mu"], inputs["aero_loads"]))
+    def solve(self, x, y, mu, data, outputs) -> None:
+        other, y, mu, aero_loads = (torch.as_tensor(a) for a in (self.other(x), y, mu, data["aero_loads"]))
 
         v_new, self._multipliers, self._jac_con = solve_slsqp(
             lambda v: self.objective(v, other, y, mu, aero_loads), self.local_constraints,
@@ -192,10 +170,9 @@ class StructSubproblem(Subproblem):
         outputs["phi"] = np.array(coupling(aero_loads, aero_loads_copy,
                                            weight, torch.as_tensor(x_new[WEIGHT_SLICE][0])))
 
-    def residual(self, inputs) -> float:
-        x = inputs["x"]
+    def residual(self, x, y, mu, data) -> float:
         v, other, y, mu, aero_loads = (torch.as_tensor(a) for a in (self.decompose(x), self.other(x),
-                                                                      inputs["y"], inputs["mu"], inputs["aero_loads"]))
+                                                                      y, mu, data["aero_loads"]))
         grad_f = np.array(torch.func.grad(self.objective)(v, other, y, mu, aero_loads))
 
         # KKT stationarity with SLSQP's multipliers for the (equality) tip-displacement constraints
@@ -243,7 +220,7 @@ print('Lift (N): ', float(lift), '  Weight (N): ', float(weight))
 # compare with the monolithic solution (the same problem solved with one SLSQP)
 solution = np.load(os.path.join(HERE, 'monolithic_solution.npz'))
 x_star = np.concatenate([solution['twist_cp'], solution['thickness_cp']])
-history = np.array([np.concatenate([h[TWIST_SLICE], h[THICKNESS_SLICE]]) for h in opt.history])
+history = np.array([np.concatenate([h[TWIST_SLICE], h[THICKNESS_SLICE]]) for h in opt.x_history])
 error = np.linalg.norm(history - x_star, axis=1) / np.linalg.norm(x_star)
 
 print('CD: ', opt.data['CD'])

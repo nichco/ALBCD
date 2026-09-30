@@ -52,12 +52,6 @@ def coupling(x):
 class Block(Subproblem):
 
     def setup(self) -> None:
-        self.add_input("x")
-        self.add_input("y")  # Lagrange multipliers
-        self.add_input("mu") # penalty parameters
-        self.add_output("x")
-        self.add_output("phi") # coupling constraints at the new x
-
         # compiled once per block: x, y and mu are arguments rather than captured
         # constants, so new values between solves don't trigger a recompile
         con = lambda v: local_constraint(v[:m])
@@ -71,8 +65,8 @@ class Block(Subproblem):
         c = coupling(x.at[self.index].set(v))
         return local_objective(v[:m]) + y @ c + 0.5 * mu @ c ** 2
 
-    def solve(self, inputs, outputs) -> None:
-        x, y, mu = (jnp.asarray(inputs[name]) for name in ("x", "y", "mu"))
+    def solve(self, x, y, mu, data, outputs) -> None:
+        x, y, mu = (jnp.asarray(a) for a in (x, y, mu))
 
         prob = mo.ProblemLite(x0=np.array(self.decompose(x)),
                               obj=lambda v: np.float64(self.obj(v, x, y, mu)),
@@ -94,11 +88,11 @@ class Block(Subproblem):
         outputs["x"] = x_new
         outputs["phi"] = np.array(coupling(jnp.asarray(x_new)))
 
-    def residual(self, inputs) -> float:
+    def residual(self, x, y, mu, data) -> float:
         """Projected-gradient KKT residual, with the sphere constraint's multiplier and the bounds."""
-        x = jnp.asarray(inputs["x"])
+        x = jnp.asarray(x)
         v = np.array(self.decompose(x))
-        grad = np.array(self.grad(jnp.asarray(v), x, inputs["y"], inputs["mu"]))
+        grad = np.array(self.grad(jnp.asarray(v), x, y, mu))
         grad += self._jac_con.T @ self._multiplier
         return float(np.max(np.abs(v - np.clip(v - grad, xl[self.index], xu[self.index]))))
 

@@ -53,8 +53,8 @@ class ErrorTerminatedALBCD(albcd.ALBCD):
 
     def checked(self, solve):
         """solve(), then stop once the solution error of the x it returns is at most the target."""
-        def wrapper(inputs, outputs):
-            solve(inputs, outputs)
+        def wrapper(x, y, mu, data, outputs):
+            solve(x, y, mu, data, outputs)
             self.solves += 1
             if np.max(np.abs(outputs["x"][:self.exact.size] - self.exact)) <= self.target:
                 raise TargetReached

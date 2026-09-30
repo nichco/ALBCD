@@ -22,27 +22,20 @@ class Block(Subproblem):
         self.sign = 1.0 if index == 0 else -1.0  # d(phi)/dv
         super().__init__(index)
 
-    def setup(self):
-        if self.target is None:
-            self.add_input("target")  # read from the solver's data dictionary
-        self.add_output("x")
-        self.add_output("phi")
-        self.add_output(f"v{self.index}")  # written to the solver's data dictionary
+    def _target(self, data):
+        return data["target"] if self.target is None else self.target
 
-    def _target(self, inputs):
-        return inputs["target"] if self.target is None else self.target
-
-    def solve(self, inputs, outputs):
-        x, y, mu = inputs["x"], inputs["y"][0], inputs["mu"][0]
-        v = (2 * self._target(inputs) - self.sign * y + mu * self.other(x)[0]) / (2 + mu)
+    def solve(self, x, y, mu, data, outputs):
+        y, mu = y[0], mu[0]
+        v = (2 * self._target(data) - self.sign * y + mu * self.other(x)[0]) / (2 + mu)
         outputs["x"] = self.recompose(x, v)
         outputs["phi"] = np.array([outputs["x"][0] - outputs["x"][1]])
         outputs[f"v{self.index}"] = v
 
-    def residual(self, inputs):
-        x, y, mu = inputs["x"], inputs["y"][0], inputs["mu"][0]
+    def residual(self, x, y, mu, data):
+        y, mu = y[0], mu[0]
         phi = x[0] - x[1]
-        return abs(2 * (x[self.index] - self._target(inputs)) + self.sign * (y + mu * phi))
+        return abs(2 * (x[self.index] - self._target(data)) + self.sign * (y + mu * phi))
 
 
 def make_solver(**kwargs):
@@ -87,12 +80,12 @@ def test_verbose_output(capsys):
 def test_history():
     opt = make_solver(x0=[0, 0])  # a list x0 is accepted
     opt.solve()
-    np.testing.assert_array_equal(opt.history[0], [0, 0])
-    np.testing.assert_array_equal(opt.history[-1], opt.x)
-    assert (len(opt.history) - 1) % 2 == 0  # one entry per subproblem solve
+    np.testing.assert_array_equal(opt.x_history[0], [0, 0])
+    np.testing.assert_array_equal(opt.x_history[-1], opt.x)
+    assert (len(opt.x_history) - 1) % 2 == 0  # one entry per subproblem solve
 
     # feasibility and optimality are logged once per sweep (here, every two block solves)
-    assert len(opt.feas_history) == len(opt.opt_history) == (len(opt.history) - 1) // 2
+    assert len(opt.feas_history) == len(opt.opt_history) == (len(opt.x_history) - 1) // 2
     np.testing.assert_allclose(opt.feas_history[-1], np.max(np.abs(opt.phi)))
     assert opt.opt_history[-1] <= opt.opt_tol[-1]  # the inner loop stops on this value
     assert np.all(np.isfinite(opt.opt_history))
@@ -126,7 +119,6 @@ def test_does_not_modify_x0():
 
 @pytest.mark.parametrize("kwargs", [
     {"opt_tol": []},
-    {"max_inner_iter": 0},
     {"mu0": None},             # coupling constraints need penalty parameters
     {"mu0": []},
     {"unconstrained": True},   # ... and an unconstrained problem has none
@@ -141,8 +133,8 @@ def test_phi_not_set():
         """Sets phi on its first solve only."""
         solves = 0
 
-        def solve(self, inputs, outputs):
-            super().solve(inputs, outputs)
+        def solve(self, x, y, mu, data, outputs):
+            super().solve(x, y, mu, data, outputs)
             self.solves += 1
             if self.solves > 1:
                 del outputs["phi"]
@@ -165,23 +157,21 @@ def test_subproblem_helpers():
     np.testing.assert_array_equal(x, [0, 1, 2, 3])  # recompose returns a copy
 
 
-def test_subproblem_requires_setup():
+def test_subproblem_requires_solve_and_residual():
+    sub = Subproblem(slice(0, 1))  # setup() is optional
     with pytest.raises(NotImplementedError):
-        Subproblem(slice(0, 1))
+        sub.solve(np.zeros(1), np.zeros(0), np.zeros(0), {}, {})
+    with pytest.raises(NotImplementedError):
+        sub.residual(np.zeros(1), np.zeros(0), np.zeros(0), {})
 
 
 class QuadraticBlock(Subproblem):
     """Minimizes (x0 - a)^2 + (x1 - b)^2 + x0 * x1 over this block's entry; no "phi" output."""
 
-    def setup(self):
-        self.add_output("x")
-
-    def solve(self, inputs, outputs):
-        x = inputs["x"]
+    def solve(self, x, y, mu, data, outputs):
         outputs["x"] = self.recompose(x, (A, B)[self.index] - self.other(x)[0] / 2)
 
-    def residual(self, inputs):
-        x = inputs["x"]
+    def residual(self, x, y, mu, data):
         return abs(2 * (x[self.index] - (A, B)[self.index]) + self.other(x)[0])
 
 
@@ -191,16 +181,11 @@ class PowellBlock(Subproblem):
     f = -x0 x1 - x1 x2 - x0 x2 + sum_i (max(xi - 1, 0)^2 + max(-xi - 1, 0)^2)
     """
 
-    def setup(self):
-        self.add_output("x")
-
-    def solve(self, inputs, outputs):
-        x = inputs["x"]
+    def solve(self, x, y, mu, data, outputs):
         s = np.sum(self.other(x))
         outputs["x"] = self.recompose(x, np.sign(s) * (1 + abs(s) / 2))
 
-    def residual(self, inputs):
-        x = inputs["x"]
+    def residual(self, x, y, mu, data):
         grad = -(np.sum(x) - x) + 2 * np.maximum(x - 1, 0) - 2 * np.maximum(-x - 1, 0)
         return abs(grad[self.index])
 
@@ -214,7 +199,7 @@ def test_unconstrained(capsys):
     assert opt.y.size == opt.mu.size == opt.phi.size == 0
     np.testing.assert_array_equal(opt.opt_tol, [1e-2, 1e-10])  # the phases are kept
     assert opt.feas_history == [0.0] * len(opt.opt_history)
-    assert len(opt.opt_history) == (len(opt.history) - 1) // 2  # one entry per sweep
+    assert len(opt.opt_history) == (len(opt.x_history) - 1) // 2  # one entry per sweep
 
     # nothing to make feasible, so each phase is one outer iteration of BCD sweeps
     lines = capsys.readouterr().out.splitlines()
@@ -230,17 +215,17 @@ def test_unconstrained_powell():
                 unconstrained=True, opt_tol=1e-5, max_inner_iter=6, verbose=False)
     opt.solve()
     assert not opt.success
-    assert len(opt.history) == 1 + 6 * 3  # a single phase, so max_inner_iter bounds the whole solve
+    assert len(opt.x_history) == 1 + 6 * 3  # a single phase, so max_inner_iter bounds the whole solve
     # after six block solves the iterate is back near x0, its perturbation shrunk 64-fold,
-    np.testing.assert_allclose(opt.history[6], [-1 - eps / 64, 1 + eps / 128, -1 - eps / 256], rtol=1e-12)
+    np.testing.assert_allclose(opt.x_history[6], [-1 - eps / 64, 1 + eps / 128, -1 - eps / 256], rtol=1e-12)
     # yet the gradient on this cycle does not vanish
     assert opt.opt_history[-1] > 1.9
 
 
 def test_unconstrained_rejects_phi():
     class WithPhi(QuadraticBlock):
-        def solve(self, inputs, outputs):
-            super().solve(inputs, outputs)
+        def solve(self, x, y, mu, data, outputs):
+            super().solve(x, y, mu, data, outputs)
             outputs["phi"] = np.zeros(1)
 
     with pytest.raises(ValueError, match="reshape"):

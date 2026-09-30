@@ -42,7 +42,7 @@ class ALBCD():
         length of ``y`` and ``phi``. Required unless ``unconstrained=True``,
         in which case it must be omitted.
     data0 : dict, optional
-        Initial values of any extra subproblem inputs/outputs, keyed by name.
+        Initial values of any quantities the subproblems share, keyed by name.
     max_mu : float
         Upper bound on each penalty parameter.
     rho : float
@@ -80,8 +80,8 @@ class ALBCD():
         optimal (the last inner loop reached the final ``opt_tol``); when
         unconstrained, only optimal.
     data : dict
-        Extra inputs/outputs shared between subproblems.
-    history : list of ndarray
+        Quantities shared between subproblems, passed to each solve() and residual().
+    x_history : list of ndarray
         ``x0`` followed by ``x`` after every subproblem solve.
     feas_history : list of float
         ``max|phi|`` after every sweep (0 when unconstrained).
@@ -109,7 +109,6 @@ class ALBCD():
                  verbose: bool = True,
                  unconstrained: bool = False,
                  ):
-        """Set up the solver. The parameters are described above."""
 
         self.subproblems = subproblems
         self.x = np.array(x0, dtype=float) # copy, so the caller's x0 is never modified
@@ -135,17 +134,13 @@ class ALBCD():
         # one optimality tolerance per phase; a scalar gives a single phase
         self.opt_tol = np.atleast_1d(np.asarray(opt_tol, dtype=float))
         if self.opt_tol.ndim != 1 or self.opt_tol.size == 0:
-            raise ValueError('opt_tol must be a float or a non-empty 1D list/array of floats')
-
-        # at least one sweep per outer iteration, so every outer iteration ends with a fresh phi
-        if max_inner_iter < 1:
-            raise ValueError('max_inner_iter must be at least 1')
+            raise ValueError('opt_tol must be a float or a 1D list/array of floats')
 
         self.max_outer_iter = max_outer_iter
         self.max_inner_iter = max_inner_iter
         self.max_y = max_y
         self.verbose = verbose
-        self.history = [self.x.copy()]
+        self.x_history = [self.x.copy()]
         self.feas_history = [] # feasibility (max constraint violation) after each sweep
         self.opt_history = []  # optimality (max-norm KKT residual) after each sweep
         self.y = np.zeros_like(self.mu) # Lagrange multipliers, one per coupling constraint
@@ -154,7 +149,8 @@ class ALBCD():
 
 
     def _update_mu(self, c_new, c_old) -> None:
-        """Grow the penalty of each constraint that is infeasible and not decreasing fast enough."""
+        """Increase the penalty parameter of each scalar constraint if
+         it is infeasible and its feasibility is not decreasing fast enough."""
         # vectorized over all constraints instead of a per-index Python loop
         f_new = np.abs(c_new)
         f_old = np.abs(c_old)
@@ -184,18 +180,17 @@ class ALBCD():
                     for sub in self.subproblems:
 
                         outputs = {}
-                        sub.solve(dict(self.data, x=self.x, y=self.y, mu=self.mu), outputs)
+                        sub.solve(self.x, self.y, self.mu, self.data, outputs)
                         self.x = outputs.pop("x")
                         # phi at the new x; none when unconstrained. A missing or wrong-sized phi fails the reshape
                         self.phi = np.array(outputs.pop("phi", []), dtype=float).reshape(self.mu.shape)
                         self.data.update(outputs)  # any other output is shared through data
 
-                        self.history.append(self.x.copy())
+                        self.x_history.append(self.x.copy())
 
                     self.feas_history.append(float(np.max(np.abs(self.phi), initial=0.0)))
 
-                    inputs = dict(self.data, x=self.x, y=self.y, mu=self.mu)
-                    res = max(sub.residual(inputs) for sub in self.subproblems)
+                    res = max(sub.residual(self.x, self.y, self.mu, self.data) for sub in self.subproblems)
                     self.opt_history.append(res)
 
                     log(f'outer {k:3d} | sweep {j:3d} | opt_res {res:.3e}')

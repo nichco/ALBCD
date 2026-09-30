@@ -56,13 +56,6 @@ class MissionSubproblem(Subproblem):
         self.i = i
         super().__init__(slice(i * block_size, (i + 1) * block_size))
 
-    def setup(self) -> None:
-        self.add_input("x")
-        self.add_input("y")  # Lagrange multipliers
-        self.add_input("mu") # penalty parameters
-        self.add_output("x")
-        self.add_output("phi") # coupling constraints at the new x
-
     def functions(self, v, x, y, mu):
         """[augmented Lagrangian, lift - weight] from a single VLM solve.
 
@@ -79,9 +72,8 @@ class MissionSubproblem(Subproblem):
         aug_lagrangian = 1e-5 * out["fuelburn"] / N + torch.sum(y * c) + 0.5 * torch.sum(mu * c**2)
         return torch.stack([aug_lagrangian, out["L_equals_W"]])
 
-    def solve(self, inputs, outputs) -> None:
-        x = inputs["x"]
-        y, mu = torch.as_tensor(inputs["y"]), torch.as_tensor(inputs["mu"])
+    def solve(self, x, y, mu, data, outputs) -> None:
+        y, mu = torch.as_tensor(y), torch.as_tensor(mu)
         f = lambda v: self.functions(v, x, y, mu)
         values = memoize_last(lambda v: f(torch.as_tensor(v)).numpy())
         derivs = memoize_last(lambda v: torch.func.jacrev(f)(torch.as_tensor(v)).numpy())
@@ -104,9 +96,8 @@ class MissionSubproblem(Subproblem):
         fuelburns[self.i] = fuelburn(self.i, v_new[:num_twist_cp], v_new[-1])
         fuelburn_history.append(np.mean(fuelburns))
 
-    def residual(self, inputs) -> float:
-        x = inputs["x"]
-        y, mu = torch.as_tensor(inputs["y"]), torch.as_tensor(inputs["mu"])
+    def residual(self, x, y, mu, data) -> float:
+        y, mu = torch.as_tensor(y), torch.as_tensor(mu)
         v = self.decompose(x)
         grad_f = torch.func.grad(lambda v: self.functions(v, x, y, mu)[0])(torch.as_tensor(v)).numpy()
 
