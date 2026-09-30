@@ -2,7 +2,7 @@
 
 """
 .. include:: ../../README.md
-   :start-after: # ALBCD
+   :start-after: # Augmented Lagrangian block coordinate descent
 """
 
 from .albcd import ALBCD
