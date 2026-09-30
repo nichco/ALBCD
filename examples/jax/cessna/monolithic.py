@@ -1,9 +1,9 @@
-"""Monolithic reference solution of the aerostructural problem in aerostruct.py.
+"""Monolithic reference solution of the Cessna wing problem in cessna.py.
 
 The same problem, solved with a single SLSQP over the twist and thickness
 control points, without the coupling copies (aero_loads_copy -> aero_loads,
 weight_copy -> weight). Its optimum is saved to monolithic_solution.npz, which
-aerostruct.py measures the ALBCD solution's error against.
+cessna.py measures the ALBCD solution's error against.
 """
 
 import os
@@ -16,11 +16,9 @@ import matplotlib.pyplot as plt
 import warnings
 warnings.filterwarnings("ignore")
 
-from beam_jax import Beam, CSTube
 from models import (aero_model, structures_model, twist_cp0, thickness_cp0, num_cp_twist, num_cp_thickness,
-                    bspline_twist, bspline_thickness, min_gauge, r, tip_disp_target, y, b, v_inf, rho_atm,
-                    mesh0_jnp, vlm_geom, vlm_aero, solve_aero, struct_mesh, num_nodes, fixed_nodes,
-                    E, G, rho_mat, load_factor, safety_factor)
+                    bspline_twist, bspline_thickness, min_gauge, sigma_yield_mpa, y, b, v_inf, rho_atm,
+                    mesh0_jnp, vlm_geom, vlm_aero, solve_aero)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -32,25 +30,24 @@ def objective(x):
 
 def constraints(x):
     _, aero_loads, lift = aero_model(x[:num_cp_twist])
-    u_r, u_l, weight = structures_model(aero_loads, x[num_cp_twist:])
-    return jnp.stack([lift - weight,
-                      u_r - tip_disp_target,
-                      u_l - tip_disp_target])
+    max_sigma_mpa, min_thickness_mm, weight = structures_model(aero_loads, x[num_cp_twist:])
+    return jnp.stack([max_sigma_mpa - sigma_yield_mpa,
+                      lift - weight,
+                      min_gauge * 1e3 - min_thickness_mm])
 
 
 x0 = np.concatenate([twist_cp0, thickness_cp0])
 
-# same thickness_cp box as aerostruct.py's StructSubproblem, twist_cp free
-xl = np.concatenate([np.full(num_cp_twist, -np.inf), np.full(num_cp_thickness, min_gauge)])
-xu = np.concatenate([np.full(num_cp_twist,  np.inf), np.full(num_cp_thickness, float(r.min()))])
-c_scaler = np.array([1e-3, 1e1, 1e1])
+cl = np.array([-np.inf, 0.0, -np.inf])  # stress <= yield, lift = weight, thickness >= min gauge
+cu = np.array([0.0, 0.0, 0.0])
+c_scaler = np.array([1e-2, 1e-2, 1e-1])
 x_scaler = np.concatenate([10 * np.ones(num_cp_twist), 100 * np.ones(num_cp_thickness)])
 
 # JaxProblem jits the objective, the constraints and their derivatives (jax.grad, jax.jacrev)
 prob = mo.JaxProblem(x0=x0, jax_obj=objective, jax_con=constraints,
-                     xl=xl, xu=xu, cl=0, cu=0, x_scaler=x_scaler, c_scaler=c_scaler, o_scaler=1e3)
+                     cl=cl, cu=cu, x_scaler=x_scaler, c_scaler=c_scaler, o_scaler=1e2)
 
-optimizer = mo.SLSQP(prob, solver_options={'maxiter': 500, 'ftol': 1e-10}, turn_off_outputs=True)
+optimizer = mo.SLSQP(prob, solver_options={'maxiter': 300, 'ftol': 1e-8}, turn_off_outputs=True)
 optimizer.solve()
 optimizer.print_results()
 
@@ -60,11 +57,11 @@ thickness_cp_star = x[num_cp_twist:]
 
 CD_star = float(objective(x))
 
-# np.savez(os.path.join(HERE, 'monolithic_solution.npz'),
-#          twist_cp=twist_cp_star,
-#          thickness_cp=thickness_cp_star,
-#          CD=CD_star,
-#          )
+np.savez(os.path.join(HERE, 'monolithic_solution.npz'),
+         twist_cp=twist_cp_star,
+         thickness_cp=thickness_cp_star,
+         CD=CD_star,
+         )
 
 
 twist = bspline_twist @ twist_cp_star
@@ -77,21 +74,14 @@ print('CD: ', float(out["CD"]))
 print('CL: ', float(out["CL"]))
 
 _, aero_loads, lift = aero_model(twist_cp_star)
-u_r, u_l, weight = structures_model(aero_loads, thickness_cp_star)
+max_sigma_mpa, min_thickness_mm, weight = structures_model(aero_loads, thickness_cp_star)
 print('Lift (N): ', float(lift), '  Weight (N): ', float(weight))
-print('Tip displacements (m): ', float(u_r), float(u_l))
-print('Min thickness (mm): ', float(jnp.min(thickness)) * 1e3)
-
-F = jnp.zeros((num_nodes, 6))
-F = F.at[:, 0].set(aero_loads[:num_nodes] * load_factor * safety_factor)
-F = F.at[:, 2].set(aero_loads[num_nodes:] * load_factor * safety_factor)
-beam = Beam(mesh=struct_mesh, E=E, G=G, rho=rho_mat,
-            cs=CSTube(radius=r, thickness=thickness), F=F, fixed_nodes=fixed_nodes)
-u = beam.solve()
-print('Mass (kg): ', float(beam.mass))
+print('Max von Mises stress, (KS) (MPa): ', float(max_sigma_mpa))
+print('Min thickness, (KS) (mm): ', float(min_thickness_mm))
+print('Min thickness, (true) (mm): ', float(jnp.min(thickness)) * 1e3)
 
 
-fig, (ax_twist, ax_thick, ax_lift, ax_disp) = plt.subplots(4, 1, figsize=(4, 3.75))
+fig, (ax_twist, ax_thick, ax_lift) = plt.subplots(3, 1, figsize=(4, 3.75))
 facecolor = 'whitesmoke'
 
 nspan_twist = y / (b / 2)
@@ -125,18 +115,10 @@ ax_lift.plot(nspan_thick, lift_per_span, linewidth=1.5, label='Solution')
 ax_lift.plot(nspan_thick, elliptical, linewidth=1.5, linestyle='--', label='Elliptical', color='tab:green')
 ax_lift.legend()
 ax_lift.set_xlim([-1, 1])
+ax_lift.set_xlabel('Normalized spanwise location')
 ax_lift.set_ylabel('Lift (N/m)')
-ax_lift.set_xticks([])
+ax_lift.set_xticks([-1, -0.5, 0, 0.5, 1])
 ax_lift.set_facecolor(facecolor)
-
-ax_disp.plot(nspan_twist, np.array(jnp.linalg.norm(u[:, :3], axis=1)), linewidth=1.5, label='Displacement')
-ax_disp.axhline(tip_disp_target, color='black', linestyle='--', linewidth=1, label='Tip target')
-ax_disp.legend()
-ax_disp.set_xlim([-1, 1])
-ax_disp.set_xlabel('Normalized spanwise location')
-ax_disp.set_ylabel('Disp. (m)')
-ax_disp.set_xticks([-1, -0.5, 0, 0.5, 1])
-ax_disp.set_facecolor(facecolor)
 
 plt.tight_layout(h_pad=0.2)
 plt.show()
