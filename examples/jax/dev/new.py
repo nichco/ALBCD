@@ -1,5 +1,5 @@
-import os
-os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+# import os
+# os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 import numpy as np
 import jax
 jax.config.update("jax_enable_x64", True)
