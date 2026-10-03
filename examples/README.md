@@ -29,6 +29,12 @@ and run any example directly, e.g. `python examples/pytorch/rosenbrock_consensus
 vertices of a cube instead of converging. Each block's minimizer and residual
 are explicit, so it needs only NumPy and matplotlib.
 
+[circle_animation.py](circle_animation.py) renders a video of ALBCD solving the
+`quadratic_global_circle.py` problem: the axis-aligned block updates on contours of the
+augmented Lagrangian, the landscape morphing as the multiplier and penalty are updated
+between outer iterations, and the feasibility and optimality histories. Its gradients are
+written out by hand, so it needs modopt, matplotlib and ffmpeg, but no autodiff library.
+
 Two larger wing design examples are in
 [jax/aerostruct/](jax/aerostruct/README.md) and [pytorch/aerostruct/](pytorch/aerostruct/README.md)
 (aerostructural design), in [jax/cessna/](jax/cessna/README.md) and

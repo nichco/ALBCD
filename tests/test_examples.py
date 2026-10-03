@@ -57,3 +57,14 @@ def test_powell():
     assert len(opt.x_history) == 1 + 6 * 3  # max_inner_iter = 6 sweeps over 3 blocks
     np.testing.assert_allclose(np.abs(opt.x), 1, atol=1e-3)  # near a vertex of [-1, 1]^3 ...
     assert opt.opt_history[-1] > 1.9  # ... where the gradient does not vanish
+
+
+def test_circle_animation():
+    """The animation's solve (the video itself is not written) reaches the quick start solution."""
+    pytest.importorskip("modopt")
+    matplotlib.use("Agg")
+    opt, log = runpy.run_path(str(EXAMPLES / "circle_animation.py"))["run_albcd"]()
+
+    assert opt.success
+    np.testing.assert_allclose(opt.x, [R, 0, R], atol=5e-3)
+    assert len(log) == len(opt.x_history) - 1  # one (block, y, mu) entry per block solve
