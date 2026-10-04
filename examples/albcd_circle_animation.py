@@ -10,7 +10,7 @@ minimized over the slack s; it morphs each time the multiplier y and penalty mu 
 updated, until its minimum lies on the constraint circle. The right plots show the
 feasibility and optimality after each BCD sweep.
 
-Needs modopt, matplotlib and ffmpeg (on the PATH, or pass --ffmpeg):
+Needs modopt, matplotlib and ffmpeg (on the PATH, via imageio-ffmpeg, or pass --ffmpeg):
 
     python examples/circle_animation.py [-o out.mp4] [--ffmpeg path/to/ffmpeg]
 """
@@ -31,7 +31,6 @@ warnings.filterwarnings("ignore")
 
 R2 = 0.5**2  # squared radius of the constraint circle
 COLORS = ['tab:orange', 'tab:purple']  # block 1 (x1, s), block 2 (x2)
-RED = '#C0392B'
 
 
 def phi(x1, s, x2):
@@ -85,20 +84,35 @@ def run_albcd():
     log = []
     blocks = [BlockSubproblem(slice(0, 2), [-np.inf, 0.0], [np.inf, np.inf], log),  # x1 and s >= 0
               BlockSubproblem(slice(2, 3), [-np.inf], [np.inf], log)]  # x2
-    opt = ALBCD(blocks, x0=np.array([-0.5, 0.0, 1.0]), mu0=np.array([1.0]), feas_tol=1e-3,
+    opt = ALBCD(blocks, x0=np.array([-0.5, 0.0, 1.0]), mu0=np.array([0.5]), feas_tol=1e-3,
                 opt_tol=[1e-2, 1e-4], max_inner_iter=100, verbose=False)
     opt.solve()
     return opt, log
 
 
+def find_ffmpeg():
+    """Return an FFmpeg executable from PATH or imageio-ffmpeg."""
+    ffmpeg = shutil.which('ffmpeg')
+    if ffmpeg:
+        return ffmpeg
+
+    try:
+        import imageio_ffmpeg
+    except ImportError:
+        return None
+    return imageio_ffmpeg.get_ffmpeg_exe()
+
+
 def make_video(opt, log, filename, ffmpeg):
+    mpl.rcParams['animation.ffmpeg_path'] = ffmpeg
     fps = 25
+    max_size_bytes = 750_000
     xy = np.array(opt.x_history)[:, [0, 2]]  # (x1, x2) before the first solve and after each solve
     feas, res = np.array(opt.feas_history), np.array(opt.opt_history)
     n_sweeps = len(feas)
     bounds = [i // 2 + 1 for i in range(1, len(log)) if log[i][1:] != log[i - 1][1:]]  # sweeps starting an outer iteration
 
-    # frames: (solves completed, fraction of the next move, y, mu); the landscape morphs at each update
+    # Frames are (solves completed, fraction of next move, y, mu).
     frames = [(0, 0, *log[0][1:])] * fps
     for i, (_, y, mu) in enumerate(log):
         if i and (y, mu) != log[i - 1][1:]:
@@ -122,12 +136,13 @@ def make_video(opt, log, filename, ffmpeg):
         a.fill(0.5 * np.cos(theta), 0.5 * np.sin(theta), color='tab:red', alpha=0.3, lw=0, zorder=2)
         a.plot(0.5 * np.cos(theta), 0.5 * np.sin(theta), '--', color='tab:red', lw=1.8, zorder=3)
         a.set_aspect('equal')
-    ax.set(xlim=lim, ylim=lim, xlabel='$x_1$', ylabel='$x_2$', xticks=[-1, 0, 1], yticks=[-1, 0, 1])
+    ax.set(xlim=lim, ylim=lim, xticks=[-1, 0, 1], yticks=[-1, 0, 1])
+    ax.set_xlabel('$x_1$', fontsize=16)
+    ax.set_ylabel('$x_2$', fontsize=16)
     inset.set(xlim=zoom, ylim=zoom, xticks=[], yticks=[])
     ax.indicate_inset_zoom(inset, edgecolor='k', alpha=0.8)
-    ax.text(0, -0.12, 'infeasible', ha='center', va='center', fontsize=12, zorder=5,
-            bbox=dict(boxstyle='round,pad=0.2', fc='white', ec='none', alpha=0.85))
-    minima, = ax.plot([], [], 'X', color='w', mec='k', mew=1.2, ms=13, zorder=5)
+
+    minima, = ax.plot([], [], 's', color='w', mec='k', mew=1.2, ms=13, zorder=5)
     ax.plot(*xy[0], 's', color='w', mec='k', ms=9, zorder=7)
 
     paths = []  # the path and the current iterate, in the main plot and the inset
@@ -135,37 +150,34 @@ def make_video(opt, log, filename, ffmpeg):
         lc = LineCollection([], lw=2.5, zorder=6)
         a.add_collection(lc)
         paths.append((lc, a.plot([], [], 'o', ms=10, mec='k', mew=1.5, zorder=8)[0]))
-    counter = ax.text(0.03, 0.97, '', transform=ax.transAxes, va='top', fontsize=15, color=RED, weight='bold', zorder=10)
-    status = ax.text(0.02, 0.02, '', transform=ax.transAxes, va='bottom', fontsize=12, zorder=10,
-                     bbox=dict(boxstyle='round', fc='white', ec='0.6', alpha=0.92))
+    counter = ax.text(0.03, 0.97, '', transform=ax.transAxes, va='top', fontsize=15, color='black', zorder=10)
+    status = ax.text(0.02, 0.02, '', transform=ax.transAxes, va='bottom', fontsize=15, zorder=10)
     fig.legend([plt.Line2D([], [], color=c, lw=3) for c in COLORS]
-               + [plt.Line2D([], [], color='tab:red', ls='--'), plt.Line2D([], [], marker='X', color='w', mec='k', ls=''),
-                  plt.Line2D([], [], marker='s', color='w', mec='k', ls='')],
-               [r'block 1 solve: $(x_1, s)$', r'block 2 solve: $x_2$', 'constraint boundary',
-                'minima of AL landscape', 'start'],
+               + [plt.Line2D([], [], color='tab:red', ls='--')],
+               [r'subproblem 1: $(x_1, s)$', r'subproblem 2: $x_2$', 'constraint boundary'],
                loc='lower center', ncol=3, frameon=False, fontsize=11)
 
     # right plots: feasibility and optimality history, revealed one sweep at a time
-    lines = []
-    for a, data, tol, label, color, tol_label in ((ax_feas, feas, opt.feas_tol, 'Feasibility', '#1F618D', 'feas tol'),
-                                                  (ax_opt, res, opt.opt_tol[-1], 'Optimality', '#117A65', 'opt tol')):
+    lines, live_values = [], []
+    plot_data = ((ax_feas, feas, opt.feas_tol, 'Feasibility', 'tab:purple', 'feas tol'),
+                 (ax_opt, res, opt.opt_tol[-1], 'Optimality', 'tab:orange', 'opt tol'))
+    for a, data, tol, label, color, tol_label in plot_data:
         a.set(yscale='log', xlim=(0.5, n_sweeps + 0.5), ylabel=label,
               ylim=(10**np.floor(np.log10(min(data.min(), tol))) / 2, 10**np.ceil(np.log10(data.max())) * 2))
-        a.grid(axis='y', alpha=0.3)
-        a.axhline(tol, color='0.4', ls=':', lw=1.5)
-        a.text(0.7, tol, tol_label, va='bottom', fontsize=10, color='0.3')
-        for b in bounds:
-            a.axvline(b - 0.5, color=RED, alpha=0.35, lw=1.2)
+        a.set_facecolor('#F7FBFF')
+        a.grid(False)
+        a.axhspan(a.get_ylim()[0], tol, facecolor='none', edgecolor='lightgray', hatch='///', linewidth=0)
+        a.text(0.72, tol, tol_label, va='bottom', fontsize=11, color='black')
         lines.append(a.plot([], [], color=color, lw=2)[0])
-    ax_feas.text(bounds[0] - 0.7, ax_feas.get_ylim()[1] / 2, 'multiplier\nupdates', ha='right', va='top',
-                 fontsize=10, color=RED)
+        live_values.append(a.text(0.97, 0.95, f'{label}: --', transform=a.transAxes,
+                                  ha='right', va='top', fontsize=11, color='black'))
     plt.setp(ax_feas.get_xticklabels(), visible=False)
-    ax_opt.set_xlabel('Iteration')
+    ax_opt.set_xlabel('Primal iteration')
 
     levels = np.concatenate([np.linspace(0, 0.12, 13), np.geomspace(0.16, 3, 9)])  # dense in the valley
     grid = [np.meshgrid(np.linspace(*lim, 301), np.linspace(*lim, 301)),
             np.meshgrid(np.linspace(*zoom, 121), np.linspace(*zoom, 121))]
-    cmap = plt.get_cmap('YlGnBu_r')
+    cmap = plt.get_cmap('Blues_r')
     norm = BoundaryNorm(levels, cmap.N, extend='max')  # one color per band, so the valley stays visible
     drawn = {}
 
@@ -193,14 +205,19 @@ def make_video(opt, log, filename, ffmpeg):
             head.set_color(colors[-1] if colors else 'w')
 
         done = min(n // 2, n_sweeps)  # a sweep is one solve of each block
-        for line, data in zip(lines, (feas, res)):
+        for line, (_, data, _, label, *_), live_value in zip(lines, plot_data, live_values):
             line.set_data(np.arange(1, done + 1), data[:done])
+            live_value.set_text(f'{label}: {data[done - 1]:.2e}' if done else f'{label}: --')
         counter.set_text(f'Dual update {1 + sum(b <= done + 1 for b in bounds)}')
-        status.set_text(f'$y = {y:.4f},\\ \\mu = {mu:.2f}$')
+        status.set_text(f'$x_1 = {pts[-1, 0]:.4f},\\ x_2 = {pts[-1, 1]:.4f}$\n'
+                        f'$y = {y:.4f},\\ \\mu = {mu:.2f}$')
 
-    writer = FFMpegWriter(fps=fps, codec='libx264', extra_args=['-pix_fmt', 'yuv420p', '-crf', '23', '-preset', 'veryslow',
-                                                                  '-tune', 'animation', '-movflags', '+faststart'])
-    with writer.saving(fig, filename, dpi=100):
+    video_bitrate = int((max_size_bytes - 32_000) * 8 / (len(frames) / fps) / 1000)
+    writer = FFMpegWriter(fps=fps, codec='libx264', extra_args=[
+        '-pix_fmt', 'yuv420p', '-b:v', f'{video_bitrate}k', '-maxrate', f'{video_bitrate}k',
+        '-bufsize', f'{2 * video_bitrate}k', '-preset', 'veryslow', '-tune', 'animation',
+        '-movflags', '+faststart'])
+    with writer.saving(fig, filename, dpi=300):
         for frame in frames:
             update(frame)
             writer.grab_frame()
@@ -209,12 +226,12 @@ def make_video(opt, log, filename, ffmpeg):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__.split('\n')[0])
-    parser.add_argument('-o', '--output', default=str(Path(__file__).with_suffix('.mp4')))
-    parser.add_argument('--ffmpeg', default=shutil.which('ffmpeg'), help='path to the ffmpeg executable')
+    parser.add_argument('-o', '--output', default=str(Path(__file__).with_name('albcd_circle_animation.mp4')))
+    parser.add_argument('--ffmpeg', help='path to the ffmpeg executable')
     args = parser.parse_args()
-    mpl.rcParams['animation.ffmpeg_path'] = args.ffmpeg or 'ffmpeg'
+
+    ffmpeg = find_ffmpeg()
 
     opt, log = run_albcd()
     print(f'success: {opt.success}, x = {opt.x}')
-    make_video(opt, log, args.output, args.ffmpeg)
-
+    make_video(opt, log, args.output, ffmpeg)
