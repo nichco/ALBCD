@@ -32,9 +32,13 @@ jax.config.update("jax_enable_x64", True)  # modopt works in float64
 import jax.numpy as jnp
 import modopt as mo
 import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation, PillowWriter
 from albcd import ALBCD, Subproblem
 import warnings
 warnings.filterwarnings("ignore")
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+NAME = os.path.splitext(os.path.basename(__file__))[0]
 
 
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 3  # number of arcs (blocks); Braun uses 3
@@ -227,20 +231,27 @@ print(f"Max coupling violation: {np.max(np.abs(opt.phi)):.2e}, "
 print(f"tf error vs monolithic: {abs(tf - tf_star) / tf_star:.2e}, relative error in x: {error[-1]:.2e}")
 
 
+def plot_trajectory(ax, x, labels=True, **kwargs):
+    """Altitude vs. downrange and thrust angle vs. normalized time along each arc of x."""
+    blocks = x.reshape(N, nv)
+    tf = sum(float(arc_time(v)) for v in blocks)
+    t_start = 0.0
+    for i, v in enumerate(blocks):
+        X, beta = (np.asarray(p) for p in arc_profiles(jnp.asarray(v)))
+        t = t_start + v[4] * np.arange(m + 1)
+        t_start = t[-1]
+        ax[0].plot(X[:, 0] * R_nm, (X[:, 1] - 1) * R_nm, "o-", ms=4, label=f"Arc {i}" if labels else None, **kwargs)
+        ax[1].plot(0.5 * (t[:-1] + t[1:]) / tf, np.rad2deg(beta), "o-", ms=4, **kwargs)
+    ax[0].axhline(120, color="k", ls="--", lw=1)
+    ax[0].set_xlabel("Downrange (nm)")
+    ax[0].set_ylabel("Altitude (nm)")
+    ax[0].legend(loc="lower right")
+    ax[1].set_xlabel("time / $t_f$")
+    ax[1].set_ylabel(r"Thrust angle $\beta$ (deg)")
+
+
 fig, ax = plt.subplots(1, 2, figsize=(10, 3.8))
-t_start = 0.0
-for i, v in enumerate(blocks):
-    X, beta = (np.asarray(p) for p in arc_profiles(jnp.asarray(v)))
-    t = t_start + v[4] * np.arange(m + 1)
-    t_start = t[-1]
-    ax[0].plot(X[:, 0] * R_nm, (X[:, 1] - 1) * R_nm, "o-", ms=4, label=f"Arc {i}")
-    ax[1].plot(0.5 * (t[:-1] + t[1:]) / tf, np.rad2deg(beta), "o-", ms=4)
-ax[0].axhline(120, color="k", ls="--", lw=1)
-ax[0].set_xlabel("Downrange (nm)")
-ax[0].set_ylabel("Altitude (nm)")
-ax[0].legend()
-ax[1].set_xlabel("time / $t_f$")
-ax[1].set_ylabel(r"Thrust angle $\beta$ (deg)")
+plot_trajectory(ax, opt.x)
 fig.tight_layout()
 
 fig, ax = plt.subplots(1, 2, figsize=(8, 2.5))
@@ -256,4 +267,24 @@ ax[1].set_ylabel("Feasibility")
 ax[1].grid(color="lavender", alpha=0.5, axis="y")
 
 plt.tight_layout()
+
+# convergence gif: the trajectory after each sweep (at most 200 frames) over the monolithic solution in gray
+sweeps = np.array(opt.x_history)[N::N]
+fig, ax = plt.subplots(1, 2, figsize=(10, 3.8))
+
+
+def draw(k):
+    for a in ax:
+        a.clear()
+    plot_trajectory(ax, x_star, labels=False, color="0.8", lw=4)
+    plot_trajectory(ax, sweeps[k])
+    ax[0].set(xlim=(-10, 250), ylim=(-10, 150))
+    ax[1].set(xlim=(0, 1), ylim=(-90, 90))
+    fig.suptitle(f"Sweep {k + 1} of {len(sweeps)}, max|phi| = {opt.feas_history[k]:.1e}")
+    fig.tight_layout()
+
+
+frames = np.unique(np.linspace(0, len(sweeps) - 1, 200).astype(int))
+FuncAnimation(fig, draw, frames=frames).save(os.path.join(HERE, f"{NAME}.gif"), writer=PillowWriter(fps=15))
+
 plt.show()
