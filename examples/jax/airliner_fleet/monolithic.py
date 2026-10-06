@@ -1,7 +1,8 @@
-"""Solve the airliner fleet problem as one optimization problem with ModOpt SLSQP.
+"""Solve the problem of airliner_fleet.py (one airliner flying N flights) as a single
+optimization problem with ModOpt SLSQP.
 
 Each flight contributes its trajectory variables, local path constraints, and fuel use.
-The only fleet-wide constraint is the total block-time budget. Pass the number of flights
+The only constraint coupling the flights is the total block-time budget. Pass the number of flights
 as an argument, e.g. ``python monolithic.py 8``.
 """
 
@@ -21,7 +22,7 @@ from models import (
 HERE = os.path.dirname(os.path.abspath(__file__))
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 4
 
-# Fleet definition and block-time budget, matching airliner_fleet.py.
+# Flights and block-time budget, matching airliner_fleet.py.
 ranges, masses = qmc.scale(
     qmc.LatinHypercube(d=2, seed=0).random(N),
     [2000e3, 22000.0], [5000e3, 28000.0],
@@ -41,12 +42,12 @@ def flight_outputs_all(z):
 
 
 def objective(z):
-    """Total fleet fuel in tonnes."""
+    """Total fuel over all flights in tonnes."""
     return jnp.sum(flight_outputs_all(z)[:, -1])
 
 
 def constraints(z):
-    """All flight-local constraints followed by the fleet block-time budget."""
+    """All flight-local constraints followed by the total block-time budget."""
     return jnp.concatenate(
         (
             flight_outputs_all(z)[:, :-1].reshape(-1),

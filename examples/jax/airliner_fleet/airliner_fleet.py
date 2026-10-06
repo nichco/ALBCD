@@ -1,7 +1,7 @@
-"""Airliner fleet trajectory optimization with ALBCD.
+"""Trajectory optimization of one airliner flying N flights, with ALBCD.
 
-N flights of the same regional airliner, with ranges and takeoff masses sampled with a
-Latin hypercube, minimize the fleet's total fuel subject to a total block-time budget. The
+One regional airliner flies N flights, with ranges and takeoff masses sampled with a Latin
+hypercube, and minimizes its total fuel subject to a total block-time budget. The
 budget is 10 % tighter than the sum of the flights' minimum-fuel times, so the flights have
 to trade fuel for time. Each flight (models.py) is one block:
 
@@ -12,7 +12,7 @@ to trade fuel for time. Each flight (models.py) is one block:
 where tau_i is the flight's block-time allocation. The single coupling constraint is the
 budget, phi = sum(tau_i) - T_budget, which is linear in the allocations: every flight
 couples to the others through one scalar, and once the multiplier on the budget is fixed,
-the flights are independent. That multiplier is the fleet's cost index (kg of fuel per
+the flights are independent. That multiplier is the airliner's cost index (kg of fuel per
 second of block time): each block minimizes its fuel plus y times its block time, plus the
 penalty (mu/2) phi^2.
 
@@ -40,7 +40,7 @@ from models import nvar, cl, cu, xl, xu, x_scaler, setup_flight, flight_outputs,
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-# fleet: range (m) and takeoff mass (kg) of each flight
+# flights: range (m) and takeoff mass (kg) of each flight
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 4  # number of flights
 ranges, masses = qmc.scale(qmc.LatinHypercube(d=2, seed=0).random(N), [2000e3, 22000.0], [5000e3, 28000.0]).T
 flights = [setup_flight(rf, m0) for rf, m0 in zip(ranges, masses)]
@@ -181,13 +181,19 @@ np.savez(os.path.join(HERE, f"fleet_albcd_N{N}.npz"),
 # gifs of the trajectories after each sweep
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation, PillowWriter
+from matplotlib.colors import ListedColormap, Normalize
+from matplotlib.cm import ScalarMappable
 from models import simulate
+
+plt.rcParams.update({"font.size": 9, "axes.grid": True,
+                     "axes.grid.axis": "y", "grid.color": "0.92", "axes.axisbelow": True})
 
 sweeps = np.array(opt.x_history)[::N]  # x0, then x after each sweep
 tau_history = sweeps[:, nvar - 1::nvar]  # block-time allocations (ks)
 sims = [[simulate(jnp.asarray(v), fl) for v, fl in zip(x.reshape(N, nvar), flights)] for x in sweeps]
-colors = plt.cm.plasma(np.linspace(0, 0.9, N))
-labels = [f"{r / 1e3:,.0f} km" for r in ranges]
+cmap = ListedColormap(plt.cm.plasma(np.linspace(0, 0.85, 256)))
+norm = Normalize(ranges.min() / 1e6, ranges.max() / 1e6)
+colors = [cmap(norm(r / 1e6)) for r in ranges]
 
 # # altitude vs range
 # fig, ax = plt.subplots(figsize=(6.5, 3))
@@ -205,23 +211,29 @@ labels = [f"{r / 1e3:,.0f} km" for r in ranges]
 # FuncAnimation(fig, update, frames=len(sweeps)).save(os.path.join(HERE, f"trajectories_N{N}.gif"), writer=PillowWriter(fps=4))
 
 # altitude vs time, with the block-time allocations stacked against the budget below
-fig, (ax, bx) = plt.subplots(2, 1, figsize=(6.5, 4), gridspec_kw={"height_ratios": [3, 1]})
-lines = [ax.plot([], [], color=c, lw=1.5, label=label)[0] for c, label in zip(colors, labels)]
+fig, (ax, bx) = plt.subplots(2, 1, figsize=(6.5, 2.75),
+                             gridspec_kw={"height_ratios": [3, 0.35], "hspace": 0.55})
+lines = [ax.plot([], [], color=c, lw=1.4)[0] for c in colors]
 t_max = max(float(s["t"][-1]) for sim in sims for s in sim) / 1e3
-ax.set(xlabel="Time (ks)", ylabel="Altitude (km)", title=" ", xlim=(0, t_max), ylim=(0, 15))
-ax.legend(loc="lower center", ncol=4, fontsize=8)
-bars = bx.barh(0, np.ones(N), color=colors, edgecolor="w")
-bx.axvline(T_budget, color="k", ls="--")
+ax.plot([], [], "k-", lw=1.4, label="With time limit")
+ax.legend(loc="lower center", ncol=2, fontsize=9, framealpha=0.9)
+ax.set(xlabel="Time (ks)", ylabel="Altitude (km)", xlim=(0, 1.01 * t_max), ylim=(3, 15))
+bars = bx.barh(0, tau_history[0], left=np.zeros(N), height=0.7,
+               color=colors, edgecolor="w", lw=0.6)
+bx.axvline(T_budget, color="k", ls="--", lw=1)
 bx.text(T_budget, 1.02, "Time limit", transform=bx.get_xaxis_transform(), ha="center", va="bottom", fontsize=8)
-bx.set(xlabel="Total block time (ks)", yticks=[], xlim=(0, 1.05 * tau_history.sum(1).max()))
-fig.tight_layout()
+bx.set(xlabel="Cumulative block time (ks)", yticks=[], xlim=(0, 1.1 * max(tau_history.sum(1).max(), T_budget)))
+bx.grid(False)
+
+cb = fig.colorbar(ScalarMappable(norm, cmap), ax=[ax, bx], pad=0.04, aspect=30)
+cb.set_label("Range (1000 km)")
+cb.outline.set_visible(False)
 
 def update_time(k):
     left = np.cumsum(tau_history[k]) - tau_history[k]
     for line, bar, s, l, w in zip(lines, bars, sims[k], left, tau_history[k]):
         line.set_data(np.asarray(s["t"]) / 1e3, np.asarray(s["h"]) / 1e3)
         bar.set_x(l), bar.set_width(w)
-    ax.set_title(f"Sweep {k}: budget violation {tau_history[k].sum() - T_budget:+.3f} ks")
     return lines + list(bars)
 
 FuncAnimation(fig, update_time, frames=len(sweeps)).save(os.path.join(HERE, f"trajectories_time_N{N}.gif"), writer=PillowWriter(fps=4))

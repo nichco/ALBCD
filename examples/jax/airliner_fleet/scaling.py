@@ -1,11 +1,11 @@
-"""Scaling study: ALBCD vs. monolithic SLSQP solve time as the fleet grows.
+"""Scaling study: ALBCD vs. monolithic SLSQP solve time as the number of flights grows.
 
-For each fleet size, runs monolithic.py and then airliner_fleet.py `repeats` times, one run at
+For each number of flights, runs monolithic.py and then airliner_fleet.py `repeats` times, one run at
 a time so the timings don't compete for the CPU, and appends each run's solve time (JAX
 compilation excluded) to scaling_runs.json. Runs already recorded there are skipped, so the
 study can be stopped and resumed, or extended by adding sizes. A run that exceeds
-`time_limit` is stopped and recorded as a lower bound, and that method isn't run for larger
-fleets. Plot the results with fig_scaling.py.
+`time_limit` is stopped and recorded as a lower bound, and that method isn't run for more
+flights. Plot the results with fig_scaling.py.
 """
 
 import os

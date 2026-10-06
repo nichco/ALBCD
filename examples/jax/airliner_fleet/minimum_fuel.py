@@ -1,6 +1,6 @@
-"""Minimum-fuel trajectory of each flight in the fleet, with no block-time budget.
+"""Minimum-fuel trajectory of each of the airliner's flights, with no block-time budget.
 
-Each flight is solved on its own with SLSQP, so the result is the fleet's unconstrained optimum,
+Each flight is solved on its own with SLSQP, so the result is the unconstrained optimum,
 for comparison with the budget-constrained solution in fig_trajectories.py. Saves the flights'
 variables to minimum_fuel_N{N}.npz. Pass the number of flights as an argument, e.g.
 `python minimum_fuel.py 8`.
@@ -21,7 +21,7 @@ from models import cl, cu, xl, xu, x_scaler, setup_flight, flight_outputs, initi
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-# the same fleet as airliner_fleet.py
+# the same flights as airliner_fleet.py
 N = int(sys.argv[1]) if len(sys.argv) > 1 else 8
 ranges, masses = qmc.scale(qmc.LatinHypercube(d=2, seed=0).random(N), [2000e3, 22000.0], [5000e3, 28000.0]).T
 
