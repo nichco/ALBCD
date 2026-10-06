@@ -1,42 +1,60 @@
+"""Figure: the fleet's altitude profiles against time, with the block-time allocations against the budget.
+
+Solid lines are the budget-constrained solution (fleet_albcd_N{N}.npz, from airliner_fleet.py) and dashed
+lines each flight's minimum-fuel trajectory (minimum_fuel_N{N}.npz, from minimum_fuel.py), colored by range.
+The lower panel stacks the flights' block-time allocations against the budget. Writes fig_trajectories.pdf.
+"""
+
 import os
 import numpy as np
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
+from matplotlib.colors import ListedColormap, Normalize
+from matplotlib.cm import ScalarMappable
 
-from models import nvar, n_h, h0, hf, setup_flight, simulate
+from models import nvar, setup_flight, simulate
 
-# plt.rcParams.update({"font.size": 9, "axes.grid": True, "grid.color": "0.92", "legend.frameon": False})
+plt.rcParams.update({"font.size": 9, "axes.grid": True,
+                     "axes.grid.axis": "y", "grid.color": "0.92", "axes.axisbelow": True})
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 N = 8
 
 data = np.load(os.path.join(HERE, f"fleet_albcd_N{N}.npz"))
 ranges, masses, blocks = data["ranges"], data["masses"], data["x"].reshape(N, nvar)
+blocks_min_fuel = np.load(os.path.join(HERE, f"minimum_fuel_N{N}.npz"))["x"].reshape(N, nvar)
 T_budget = 0.9 * np.sum(0.276 + 5.468e-6 * ranges)  # ks, as in airliner_fleet.py
 
-fig, (ax, bx) = plt.subplots(2, 1, figsize=(6.5, 3.1), gridspec_kw={"height_ratios": [3, 0.6]})
-left = 0.0  # block-time allocations stacked against the budget in the lower panel
-for color, i in zip(plt.cm.plasma(np.linspace(0, 0.9, N)), np.argsort(ranges)):  # colored by range
-    fl = setup_flight(ranges[i], masses[i])
-    out = simulate(jnp.asarray(blocks[i]), fl)
-    ax.plot(np.asarray(fl["r_nodes"]) / 1e3, np.asarray(out["h"]) / 1e3, color=color, lw=1.5,
-            label=f"{ranges[i] / 1e3:,.0f} km, {masses[i] / 1e3:.1f} t")
-    # altitude control points (the two fixed ones at each end included) at their Greville abscissae
-    ch = np.concatenate(([h0, h0], blocks[i][:n_h], [hf, hf]))
-    ax.plot(np.asarray(fl["greville"]) / 1e3, ch / 1e3, "o", color=color, ms=2.5, alpha=0.6)
-    bx.barh(0, blocks[i][-1], left=left, color=color, edgecolor="w")
-    left += blocks[i][-1]
-    # ax.plot(np.asarray(fl["r_nodes"]) / 1e3, np.asarray(out["h"]) / 1e3, lw=2,
-    #             label=f"{ranges[i] / 1e3:,.0f} km, {masses[i] / 1e3:.1f} t")
+cmap = ListedColormap(plt.cm.plasma(np.linspace(0, 0.85, 256)))
+norm = Normalize(ranges.min() / 1e3, ranges.max() / 1e3)
+dashed = dict(lw=0.9, ls=(0, (3, 2)), alpha=0.7)
 
-ax.set_xlabel("Range (km)")
-ax.set_ylabel("Altitude (km)")
-ax.set_xlim(0, ranges.max() / 1e3)
-ax.set_ylim(3, 15)
-ax.legend(loc="lower center", ncol=2, fontsize=8, title_fontsize=7)
-bx.axvline(T_budget, color="k", ls="--")
+fig, (ax, bx) = plt.subplots(2, 1, figsize=(6.5, 3.0), gridspec_kw={"height_ratios": [3, 0.55], "hspace": 0.55})
+left, t_max = 0.0, 0.0  # left: block-time allocations stacked against the budget in the lower panel
+for i in np.argsort(ranges):
+    color = cmap(norm(ranges[i] / 1e3))
+    fl = setup_flight(ranges[i], masses[i])
+    for v, style in ((blocks_min_fuel[i], dashed), (blocks[i], dict(lw=1.4))):
+        out = simulate(jnp.asarray(v), fl)
+        ax.plot(np.asarray(out["t"]) / 1e3, np.asarray(out["h"]) / 1e3, color=color, **style)
+        t_max = max(t_max, float(out["t"][-1]) / 1e3)
+    bx.barh(0, blocks[i][-1], left=left, height=0.7, color=color, edgecolor="w", lw=0.6)
+    left += blocks[i][-1]
+
+ax.plot([], [], "k-", lw=1.4, label="Time budget")
+ax.plot([], [], "k", label="Minimum fuel", **dashed)
+ax.legend(loc="lower center", ncol=2, fontsize=8)
+ax.set(xlabel="Time (ks)", ylabel="Altitude (km)", xlim=(0, 1.01 * t_max), ylim=(3, 15))
+
+bx.axvline(T_budget, color="k", ls="--", lw=1)
 bx.text(T_budget, 1.02, "Time limit", transform=bx.get_xaxis_transform(), ha="center", va="bottom", fontsize=8)
-bx.set(xlabel="Total block time (ks)", yticks=[], xlim=(0, 1.05 * max(left, T_budget)))
-fig.tight_layout()
+bx.set(xlabel="Cumulative block time (ks)", yticks=[], xlim=(0, 1.03 * max(left, T_budget)))
+bx.grid(False)
+bx.spines["left"].set_visible(False)
+
+cb = fig.colorbar(ScalarMappable(norm, cmap), ax=[ax, bx], pad=0.04, aspect=30)
+cb.set_label("Range (km)")
+cb.outline.set_visible(False)
+
 fig.savefig(os.path.join(HERE, "fig_trajectories.pdf"), bbox_inches="tight")
 plt.show()
