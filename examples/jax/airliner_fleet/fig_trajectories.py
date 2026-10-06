@@ -12,8 +12,10 @@ N = 8
 
 data = np.load(os.path.join(HERE, f"fleet_albcd_N{N}.npz"))
 ranges, masses, blocks = data["ranges"], data["masses"], data["x"].reshape(N, nvar)
+T_budget = 0.9 * np.sum(0.276 + 5.468e-6 * ranges)  # ks, as in airliner_fleet.py
 
-fig, ax = plt.subplots(figsize=(6.5, 2.25))
+fig, (ax, bx) = plt.subplots(2, 1, figsize=(6.5, 3.1), gridspec_kw={"height_ratios": [3, 0.6]})
+left = 0.0  # block-time allocations stacked against the budget in the lower panel
 for color, i in zip(plt.cm.plasma(np.linspace(0, 0.9, N)), np.argsort(ranges)):  # colored by range
     fl = setup_flight(ranges[i], masses[i])
     out = simulate(jnp.asarray(blocks[i]), fl)
@@ -22,6 +24,8 @@ for color, i in zip(plt.cm.plasma(np.linspace(0, 0.9, N)), np.argsort(ranges)): 
     # altitude control points (the two fixed ones at each end included) at their Greville abscissae
     ch = np.concatenate(([h0, h0], blocks[i][:n_h], [hf, hf]))
     ax.plot(np.asarray(fl["greville"]) / 1e3, ch / 1e3, "o", color=color, ms=2.5, alpha=0.6)
+    bx.barh(0, blocks[i][-1], left=left, color=color, edgecolor="w")
+    left += blocks[i][-1]
     # ax.plot(np.asarray(fl["r_nodes"]) / 1e3, np.asarray(out["h"]) / 1e3, lw=2,
     #             label=f"{ranges[i] / 1e3:,.0f} km, {masses[i] / 1e3:.1f} t")
 
@@ -30,6 +34,9 @@ ax.set_ylabel("Altitude (km)")
 ax.set_xlim(0, ranges.max() / 1e3)
 ax.set_ylim(3, 15)
 ax.legend(loc="lower center", ncol=2, fontsize=8, title_fontsize=7)
+bx.axvline(T_budget, color="k", ls="--")
+bx.text(T_budget, 1.02, "Time limit", transform=bx.get_xaxis_transform(), ha="center", va="bottom", fontsize=8)
+bx.set(xlabel="Total block time (ks)", yticks=[], xlim=(0, 1.05 * max(left, T_budget)))
 fig.tight_layout()
 fig.savefig(os.path.join(HERE, "fig_trajectories.pdf"), bbox_inches="tight")
 plt.show()

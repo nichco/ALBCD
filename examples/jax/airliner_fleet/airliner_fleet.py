@@ -212,7 +212,7 @@ ax.set(xlabel="Time (ks)", ylabel="Altitude (km)", title=" ", xlim=(0, t_max), y
 ax.legend(loc="lower center", ncol=4, fontsize=8)
 bars = bx.barh(0, np.ones(N), color=colors, edgecolor="w")
 bx.axvline(T_budget, color="k", ls="--")
-bx.text(T_budget, 1.02, "budget", transform=bx.get_xaxis_transform(), ha="center", va="bottom", fontsize=8)
+bx.text(T_budget, 1.02, "Time limit", transform=bx.get_xaxis_transform(), ha="center", va="bottom", fontsize=8)
 bx.set(xlabel="Total block time (ks)", yticks=[], xlim=(0, 1.05 * tau_history.sum(1).max()))
 fig.tight_layout()
 
