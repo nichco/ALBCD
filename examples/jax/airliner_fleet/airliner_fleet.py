@@ -2,7 +2,7 @@
 
 N flights of the same regional airliner, with ranges and takeoff masses sampled with a
 Latin hypercube, minimize the fleet's total fuel subject to a total block-time budget. The
-budget is 3 % tighter than the sum of the flights' minimum-fuel times, so the flights have
+budget is 5 % tighter than the sum of the flights' minimum-fuel times, so the flights have
 to trade fuel for time. Each flight (models.py) is one block:
 
     FlightSubproblem i  owns [h coefficients_i, v coefficients_i, tau_i]
@@ -16,10 +16,10 @@ the flights are independent. That multiplier is the fleet's cost index (kg of fu
 second of block time): each block minimizes its fuel plus y times its block time, plus the
 penalty (mu/2) phi^2.
 
-Run this file to solve the problem, compare the result with the monolithic solution in
-monolithic_solution_N{N}.npz (generate it with monolithic.py), and plot the trajectories
-and the convergence. Pass the number of flights as an argument, e.g.
-`python airliner_fleet.py 8`.
+Run this file to solve the problem and compare the result with the monolithic solution in
+monolithic_solution_N{N}.npz (generate it with monolithic.py). The solution and convergence
+history are saved to convergence_N{N}.npz, which the fig_*.py scripts plot. Pass the number
+of flights as an argument, e.g. `python airliner_fleet.py 8`.
 """
 
 import os
@@ -31,13 +31,12 @@ import numpy as np
 import jax
 import jax.numpy as jnp
 import modopt as mo
-import matplotlib.pyplot as plt
 from scipy.stats import qmc
 from albcd import ALBCD, Subproblem
 import warnings
 warnings.filterwarnings("ignore")
 
-from models import nvar, cl, cu, xl, xu, x_scaler, setup_flight, flight_outputs, initial_guess, simulate, last_call_cache
+from models import nvar, cl, cu, xl, xu, x_scaler, setup_flight, flight_outputs, initial_guess, last_call_cache
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -46,13 +45,16 @@ N = int(sys.argv[1]) if len(sys.argv) > 1 else 4  # number of flights
 ranges, masses = qmc.scale(qmc.LatinHypercube(d=2, seed=0).random(N), [2000e3, 22000.0], [5000e3, 28000.0]).T
 flights = [setup_flight(rf, m0) for rf, m0 in zip(ranges, masses)]
 
-# block-time budget (ks): 3 % below the sum of the flights' minimum-fuel times, from a fit of
-# single-flight minimum-fuel solves at 2,000-5,000 km and 22-28 t (within 20 s; the takeoff
-# mass changes the minimum-fuel time by less than 0.1 ks, so only the range enters)
-T_budget = 0.97 * np.sum(0.298 + 5.488e-6 * ranges)
+# block-time budget (ks): 5 % below the sum of the flights' minimum-fuel times, from a fit of
+# single-flight minimum-fuel solves at 2,000-5,000 km and 22-28 t (within 1 min; the takeoff
+# mass changes the minimum-fuel time by about 0.1 ks, so only the range enters)
+# T_budget = 0.95 * np.sum(0.276 + 5.468e-6 * ranges)
+T_budget = 0.8 * np.sum(0.276 + 5.468e-6 * ranges)
 
 # global x = [v_0, v_1, ..., v_{N-1}], where v_i = [h coefficients, v coefficients, tau] of flight i
 taus = lambda x: x[nvar - 1::nvar]
+
+y_history = []  # the multiplier on the budget (the cost index) at each sweep
 
 # compiled once and shared by every block (the flight's data is an argument)
 outputs_fn = jax.jit(flight_outputs)
@@ -91,6 +93,8 @@ class FlightSubproblem(Subproblem):
         return grad
 
     def solve(self, x, y, mu, data, outputs) -> None:
+        if self.index.start == 0:  # the first block of a sweep
+            y_history.append(float(y[0]))
         prob = mo.ProblemLite(x0=np.array(self.decompose(x)),
                               obj=lambda v: self.objective(v, x, y, mu),
                               grad=lambda v: self.gradient(v, x, y, mu),
@@ -162,37 +166,60 @@ else:
     error = None
     print(f"No monolithic solution for N = {N}; run monolithic.py to create it.")
 
-# convergence data, for plotting without rerunning the solve. opt_history and feas_history have one
+# solution and convergence data, for the figures. opt_history, feas_history and y_history have one
 # entry per sweep; error has one per subproblem solve, and a leading entry for x0
-np.savez(os.path.join(HERE, f"convergence_N{N}.npz"),
-         opt_history=opt.opt_history, feas_history=opt.feas_history,
-         error=np.array([]) if error is None else error, x=opt.x, fuel=fuel_kg, cost_index=opt.y[0],
-         success=opt.success, time=opt.tf, solves=len(opt.x_history) - 1)
+
+# np.savez(os.path.join(HERE, f"convergence_N{N}.npz"),
+#          opt_history=opt.opt_history, feas_history=opt.feas_history, y_history=y_history,
+#          error=np.array([]) if error is None else error, x=opt.x, fuel=fuel_kg, cost_index=opt.y[0],
+#          ranges=ranges, masses=masses, feas_tol=opt.feas_tol, opt_tol=opt.opt_tol,
+#          success=opt.success, time=opt.tf, solves=len(opt.x_history) - 1)
 
 
-fig, ax = plt.subplots(2, 1, sharex=True, figsize=(7, 5))
-for i, (v, fl) in enumerate(zip(blocks, flights)):
-    out = simulate(jnp.asarray(v), fl)
-    ax[0].plot(fl["r_nodes"] / 1e3, out["h"], label=f"Flight {i}")
-    ax[1].plot(fl["r_nodes"] / 1e3, out["mach"])
-ax[0].set_ylabel("Altitude (m)")
-ax[1].set_ylabel("Mach")
-ax[1].set_xlabel("Range (km)")
-ax[0].legend(fontsize=8)
+# gifs of the trajectories after each sweep
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation, PillowWriter
+from models import simulate
+
+sweeps = np.array(opt.x_history)[::N]  # x0, then x after each sweep
+tau_history = sweeps[:, nvar - 1::nvar]  # block-time allocations (ks)
+sims = [[simulate(jnp.asarray(v), fl) for v, fl in zip(x.reshape(N, nvar), flights)] for x in sweeps]
+colors = plt.cm.plasma(np.linspace(0, 0.9, N))
+labels = [f"{r / 1e3:,.0f} km" for r in ranges]
+
+# altitude vs range
+fig, ax = plt.subplots(figsize=(6.5, 3))
+lines = [ax.plot([], [], color=c, lw=1.5, label=label)[0] for c, label in zip(colors, labels)]
+ax.set(xlabel="Range (km)", ylabel="Altitude (km)", title=" ", xlim=(0, ranges.max() / 1e3), ylim=(0, 15))
+ax.legend(loc="lower center", ncol=4, fontsize=8)
 fig.tight_layout()
 
-fig, ax = plt.subplots(1, 2, figsize=(8, 2.5))
-if error is not None:
-    ax[0].semilogy(error, linewidth=2, color="tab:blue")
-ax[0].set_xlabel("Subproblem solve")
-ax[0].set_ylabel("Relative error")
-ax[0].grid(color="lavender", alpha=0.5, axis="y")
+def update(k):
+    for line, fl, s in zip(lines, flights, sims[k]):
+        line.set_data(np.asarray(fl["r_nodes"]) / 1e3, np.asarray(s["h"]) / 1e3)
+    ax.set_title(f"Sweep {k}")
+    return lines
 
-ax[1].semilogy(opt.feas_history, linewidth=2, color="tab:orange")
-ax[1].axhline(opt.feas_tol, color="gray", linewidth=1, linestyle="--", alpha=0.8)
-ax[1].set_xlabel("Sweep")
-ax[1].set_ylabel("Feasibility")
-ax[1].grid(color="lavender", alpha=0.5, axis="y")
+FuncAnimation(fig, update, frames=len(sweeps)).save(os.path.join(HERE, f"trajectories_N{N}.gif"), writer=PillowWriter(fps=4))
 
-plt.tight_layout()
-plt.show()
+# altitude vs time, with the block-time allocations stacked against the budget below
+fig, (ax, bx) = plt.subplots(2, 1, figsize=(6.5, 4), gridspec_kw={"height_ratios": [3, 1]})
+lines = [ax.plot([], [], color=c, lw=1.5, label=label)[0] for c, label in zip(colors, labels)]
+t_max = max(float(s["t"][-1]) for sim in sims for s in sim) / 1e3
+ax.set(xlabel="Time (ks)", ylabel="Altitude (km)", title=" ", xlim=(0, t_max), ylim=(0, 15))
+ax.legend(loc="lower center", ncol=4, fontsize=8)
+bars = bx.barh(0, np.ones(N), color=colors, edgecolor="w")
+bx.axvline(T_budget, color="k", ls="--")
+bx.text(T_budget, 1.02, "budget", transform=bx.get_xaxis_transform(), ha="center", va="bottom", fontsize=8)
+bx.set(xlabel="Total block time (ks)", yticks=[], xlim=(0, 1.05 * tau_history.sum(1).max()))
+fig.tight_layout()
+
+def update_time(k):
+    left = np.cumsum(tau_history[k]) - tau_history[k]
+    for line, bar, s, l, w in zip(lines, bars, sims[k], left, tau_history[k]):
+        line.set_data(np.asarray(s["t"]) / 1e3, np.asarray(s["h"]) / 1e3)
+        bar.set_x(l), bar.set_width(w)
+    ax.set_title(f"Sweep {k}: budget violation {tau_history[k].sum() - T_budget:+.3f} ks")
+    return lines + list(bars)
+
+FuncAnimation(fig, update_time, frames=len(sweeps)).save(os.path.join(HERE, f"trajectories_time_N{N}.gif"), writer=PillowWriter(fps=4))

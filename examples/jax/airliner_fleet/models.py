@@ -16,7 +16,7 @@ import jax
 jax.config.update("jax_enable_x64", True)  # modopt works in float64
 import jax.numpy as jnp
 from scipy.interpolate import BSpline
-from atmos1976_jax import atmosphere
+from atmos1976_smooth_jax import atmosphere  # US 1976 with the tropopause corner rounded over 1.5 km
 from rk4_jax import rk4
 
 # aircraft
