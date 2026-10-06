@@ -2,7 +2,7 @@
 
 N flights of the same regional airliner, with ranges and takeoff masses sampled with a
 Latin hypercube, minimize the fleet's total fuel subject to a total block-time budget. The
-budget is 5 % tighter than the sum of the flights' minimum-fuel times, so the flights have
+budget is 10 % tighter than the sum of the flights' minimum-fuel times, so the flights have
 to trade fuel for time. Each flight (models.py) is one block:
 
     FlightSubproblem i  owns [h coefficients_i, v coefficients_i, tau_i]
@@ -36,7 +36,7 @@ from albcd import ALBCD, Subproblem
 import warnings
 warnings.filterwarnings("ignore")
 
-from models import nvar, cl, cu, xl, xu, x_scaler, setup_flight, flight_outputs, initial_guess, last_call_cache
+from models import nvar, cl, cu, xl, xu, x_scaler, setup_flight, flight_outputs, initial_guess, last_call_cache, peak_memory
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -45,11 +45,10 @@ N = int(sys.argv[1]) if len(sys.argv) > 1 else 4  # number of flights
 ranges, masses = qmc.scale(qmc.LatinHypercube(d=2, seed=0).random(N), [2000e3, 22000.0], [5000e3, 28000.0]).T
 flights = [setup_flight(rf, m0) for rf, m0 in zip(ranges, masses)]
 
-# block-time budget (ks): 5 % below the sum of the flights' minimum-fuel times, from a fit of
+# block-time budget (ks): 10 % below the sum of the flights' minimum-fuel times, from a fit of
 # single-flight minimum-fuel solves at 2,000-5,000 km and 22-28 t (within 1 min; the takeoff
 # mass changes the minimum-fuel time by about 0.1 ks, so only the range enters)
-# T_budget = 0.95 * np.sum(0.276 + 5.468e-6 * ranges)
-T_budget = 0.8 * np.sum(0.276 + 5.468e-6 * ranges)
+T_budget = 0.9 * np.sum(0.276 + 5.468e-6 * ranges)
 
 # global x = [v_0, v_1, ..., v_{N-1}], where v_i = [h coefficients, v coefficients, tau] of flight i
 taus = lambda x: x[nvar - 1::nvar]
@@ -143,7 +142,9 @@ opt = ALBCD(subproblems=[FlightSubproblem(i) for i in range(N)],
             max_outer_iter=100,
             max_inner_iter=20)
 
+memory_before = peak_memory()  # MB: imports, setup and JAX compilation
 opt.solve()
+memory = peak_memory()  # MB, including the solve
 
 
 blocks = opt.x.reshape(N, nvar)
@@ -169,11 +170,12 @@ else:
 # solution and convergence data, for the figures. opt_history, feas_history and y_history have one
 # entry per sweep; error has one per subproblem solve, and a leading entry for x0
 
-# np.savez(os.path.join(HERE, f"convergence_N{N}.npz"),
-#          opt_history=opt.opt_history, feas_history=opt.feas_history, y_history=y_history,
-#          error=np.array([]) if error is None else error, x=opt.x, fuel=fuel_kg, cost_index=opt.y[0],
-#          ranges=ranges, masses=masses, feas_tol=opt.feas_tol, opt_tol=opt.opt_tol,
-#          success=opt.success, time=opt.tf, solves=len(opt.x_history) - 1)
+np.savez(os.path.join(HERE, f"fleet_albcd_N{N}.npz"),
+         opt_history=opt.opt_history, feas_history=opt.feas_history, y_history=y_history,
+         error=np.array([]) if error is None else error, x=opt.x, fuel=fuel_kg, cost_index=opt.y[0],
+         ranges=ranges, masses=masses, feas_tol=opt.feas_tol, opt_tol=opt.opt_tol,
+         success=opt.success, time=opt.tf, solves=len(opt.x_history) - 1,
+         peak_memory=memory, peak_memory_before_solve=memory_before)
 
 
 # gifs of the trajectories after each sweep
@@ -187,20 +189,20 @@ sims = [[simulate(jnp.asarray(v), fl) for v, fl in zip(x.reshape(N, nvar), fligh
 colors = plt.cm.plasma(np.linspace(0, 0.9, N))
 labels = [f"{r / 1e3:,.0f} km" for r in ranges]
 
-# altitude vs range
-fig, ax = plt.subplots(figsize=(6.5, 3))
-lines = [ax.plot([], [], color=c, lw=1.5, label=label)[0] for c, label in zip(colors, labels)]
-ax.set(xlabel="Range (km)", ylabel="Altitude (km)", title=" ", xlim=(0, ranges.max() / 1e3), ylim=(0, 15))
-ax.legend(loc="lower center", ncol=4, fontsize=8)
-fig.tight_layout()
+# # altitude vs range
+# fig, ax = plt.subplots(figsize=(6.5, 3))
+# lines = [ax.plot([], [], color=c, lw=1.5, label=label)[0] for c, label in zip(colors, labels)]
+# ax.set(xlabel="Range (km)", ylabel="Altitude (km)", title=" ", xlim=(0, ranges.max() / 1e3), ylim=(0, 15))
+# ax.legend(loc="lower center", ncol=4, fontsize=8)
+# fig.tight_layout()
 
-def update(k):
-    for line, fl, s in zip(lines, flights, sims[k]):
-        line.set_data(np.asarray(fl["r_nodes"]) / 1e3, np.asarray(s["h"]) / 1e3)
-    ax.set_title(f"Sweep {k}")
-    return lines
+# def update(k):
+#     for line, fl, s in zip(lines, flights, sims[k]):
+#         line.set_data(np.asarray(fl["r_nodes"]) / 1e3, np.asarray(s["h"]) / 1e3)
+#     ax.set_title(f"Sweep {k}")
+#     return lines
 
-FuncAnimation(fig, update, frames=len(sweeps)).save(os.path.join(HERE, f"trajectories_N{N}.gif"), writer=PillowWriter(fps=4))
+# FuncAnimation(fig, update, frames=len(sweeps)).save(os.path.join(HERE, f"trajectories_N{N}.gif"), writer=PillowWriter(fps=4))
 
 # altitude vs time, with the block-time allocations stacked against the budget below
 fig, (ax, bx) = plt.subplots(2, 1, figsize=(6.5, 4), gridspec_kw={"height_ratios": [3, 1]})

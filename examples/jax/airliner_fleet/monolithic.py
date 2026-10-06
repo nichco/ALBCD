@@ -15,7 +15,7 @@ from scipy.stats import qmc
 
 from models import (
     nvar, cl, cu, xl, xu, x_scaler, setup_flight, flight_outputs,
-    initial_guess,
+    initial_guess, peak_memory,
 )
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -27,8 +27,7 @@ ranges, masses = qmc.scale(
     [2000e3, 22000.0], [5000e3, 28000.0],
 ).T
 flights = [setup_flight(rf, m0) for rf, m0 in zip(ranges, masses)]
-# T_budget = 0.97 * np.sum(0.276 + 5.468e-6 * ranges)
-T_budget = 0.95 * np.sum(0.276 + 5.468e-6 * ranges)
+T_budget = 0.9 * np.sum(0.276 + 5.468e-6 * ranges)
 
 # z = [flight 0 variables, ..., flight N-1 variables]. Each flight's variables are
 # [altitude coefficients, speed coefficients, block-time allocation].
@@ -76,7 +75,9 @@ optimizer = mo.SLSQP(
     solver_options={"maxiter": 2000, "ftol": 1e-9},
     turn_off_outputs=True,
 )
+memory_before = peak_memory()  # MB: imports, setup and JAX compilation
 optimizer.solve()
+memory = peak_memory()  # MB, including the solve
 optimizer.print_results()
 
 z = optimizer.results["x"] / tile(x_scaler)
@@ -96,4 +97,5 @@ np.savez(
     os.path.join(HERE, f"monolithic_solution_N{N}.npz"),
     z=z, fuel=fuel_kg, tau=tau, cost_index=cost_index,
     time=elapsed, nit=nit, success=success,
+    peak_memory=memory, peak_memory_before_solve=memory_before,
 )

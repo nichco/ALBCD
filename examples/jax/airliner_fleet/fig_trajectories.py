@@ -10,7 +10,7 @@ from models import nvar, n_h, h0, hf, setup_flight, simulate
 HERE = os.path.dirname(os.path.abspath(__file__))
 N = 8
 
-data = np.load(os.path.join(HERE, f"convergence_N{N}.npz"))
+data = np.load(os.path.join(HERE, f"fleet_albcd_N{N}.npz"))
 ranges, masses, blocks = data["ranges"], data["masses"], data["x"].reshape(N, nvar)
 
 fig, ax = plt.subplots(figsize=(6.5, 2.25))

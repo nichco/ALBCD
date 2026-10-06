@@ -11,6 +11,7 @@ flight's block-time allocation (ks), tied to its simulated flight time by a loca
 constraint.
 """
 
+import sys
 import numpy as np
 import jax
 jax.config.update("jax_enable_x64", True)  # modopt works in float64
@@ -164,6 +165,15 @@ def initial_guess(fl):
     v = np.concatenate((h0 + (12000 - h0) * shape[2:-2], v0 + (180 - v0) * shape[1:], [0.0]))
     v[-1] = 1e-3 * float(simulate(jnp.asarray(v), fl)["t"][-1])
     return v
+
+
+def peak_memory():
+    """Peak resident memory of this process so far (MB)."""
+    if sys.platform == "win32":
+        import psutil
+        return psutil.Process().memory_info().peak_wset / 2**20
+    import resource
+    return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 2**10  # kB on Linux
 
 
 def last_call_cache(f):

@@ -2,8 +2,8 @@
 
 Budget violation, block optimality residual and cost index against sweep, and the relative
 error against the monolithic solution against block solves per flight. Reads
-convergence_N{N}.npz (run airliner_fleet.py, and monolithic.py for the error) and writes
-fig_convergence.pdf. Pass the fleet sizes as arguments (default 4 8 12).
+fleet_albcd_N{N}.npz (run airliner_fleet.py, and monolithic.py for the error) and writes
+fig_convergence.pdf. Pass the fleet sizes as arguments (default 2 6 10).
 """
 
 import os
@@ -15,12 +15,12 @@ plt.rcParams.update({"font.size": 9, "axes.spines.top": False, "axes.spines.righ
                      "grid.color": "0.92", "legend.frameon": False})
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sizes = [int(n) for n in sys.argv[1:]] or [4, 8, 12]
+sizes = [int(n) for n in sys.argv[1:]] or [2, 6, 10]
 
 fig, ax = plt.subplots(2, 2, figsize=(6.5, 4.6))
 (feas, opt), (err, ci) = ax
 for color, n in zip(plt.cm.viridis(np.linspace(0, 0.8, len(sizes))), sizes):
-    d = np.load(os.path.join(HERE, f"convergence_N{n}.npz"))
+    d = np.load(os.path.join(HERE, f"fleet_albcd_N{n}.npz"))
     sweeps = np.arange(1, len(d["feas_history"]) + 1)
     feas.semilogy(sweeps, d["feas_history"], color=color, lw=1.3, label=f"$N$ = {n}")
     opt.semilogy(sweeps, d["opt_history"], color=color, lw=1.3)
