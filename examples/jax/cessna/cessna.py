@@ -211,101 +211,120 @@ _, _, weight_init = structures_model(aero_loads_init, thickness_cp0)
 
 x0 = np.concatenate([twist_cp0, [float(weight_init)], thickness_cp0, np.array(aero_loads_init)])
 
-opt = ALBCD(subproblems=[AeroSubproblem(AERO_INDEX), StructSubproblem(STRUCT_INDEX)],
-            x0=x0,
-            mu0=np.full(N_CON, 10.0),
-            data0={"weight": float(weight_init), "aero_loads": np.array(aero_loads_init), "CD": float(CD_init)},
-            max_mu=1e6,
-            rho=1.2,
-            tau=0.5,
-            feas_tol=3e-4,
-            opt_tol=[1e-1, 1e-3],
-            max_outer_iter=40,
-            max_inner_iter=12)
 
-opt.solve()
-
-
-twist_cp = opt.x[TWIST_SLICE]
-thickness_cp = opt.x[THICKNESS_SLICE]
-aero_loads_copy = opt.x[LOADS_SLICE]
-
-_, _, lift = aero_model(twist_cp)
-max_sigma_mpa, min_thickness_mm, weight = structures_model(aero_loads_copy, thickness_cp)
-print('Max von Mises stress, (KS) (MPa): ', float(max_sigma_mpa))
-print('Min thickness, (KS) (mm): ', float(min_thickness_mm))
-print('Lift (N): ', float(lift), '  Weight (N): ', float(weight))
-
-# compare with the monolithic solution (the same problem solved with one SLSQP)
-solution = np.load(os.path.join(HERE, 'monolithic_solution.npz'))
-x_star = np.concatenate([solution['twist_cp'], solution['thickness_cp']])
-history = np.array([np.concatenate([h[TWIST_SLICE], h[THICKNESS_SLICE]]) for h in opt.x_history])
-error = np.linalg.norm(history - x_star, axis=1) / np.linalg.norm(x_star)
-
-print('CD: ', opt.data['CD'])
-print('CD (monolithic): ', float(solution['CD']))
-print('Relative error: ', error[-1])
+def make_albcd(rho=1.2, mu0=10.0, max_inner_iter=12, max_outer_iter=40):
+    """The ALBCD optimizer for this problem, with penalty growth factor rho, initial penalty mu0,
+    and at most max_inner_iter sweeps per outer iteration."""
+    return ALBCD(subproblems=[AeroSubproblem(AERO_INDEX), StructSubproblem(STRUCT_INDEX)],
+                 x0=x0,
+                 mu0=np.full(N_CON, mu0),
+                 data0={"weight": float(weight_init), "aero_loads": np.array(aero_loads_init), "CD": float(CD_init)},
+                 max_mu=1e6,
+                 rho=rho,
+                 tau=0.5,
+                 feas_tol=3e-4,
+                 opt_tol=[1e-1, 1e-3],
+                 max_outer_iter=max_outer_iter,
+                 max_inner_iter=max_inner_iter)
 
 
-twist = np.array(bspline_twist @ twist_cp)
-thickness = np.array(bspline_thickness @ thickness_cp)
-
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 3))
-ax1.plot(y, np.degrees(twist))
-ax1.set_xlabel('Spanwise location (m)')
-ax1.set_ylabel('Twist (deg)')
-ax2.plot(0.5 * (y[:-1] + y[1:]), thickness * 1e3)
-ax2.set_xlabel('Spanwise location (m)')
-ax2.set_ylabel('Thickness (mm)')
-plt.tight_layout()
+def design_error(x_history):
+    """Relative error in [twist_cp, thickness_cp] against the monolithic solution, for each x in x_history."""
+    solution = np.load(os.path.join(HERE, 'monolithic_solution.npz'))
+    x_star = np.concatenate([solution['twist_cp'], solution['thickness_cp']])
+    history = np.array([np.concatenate([h[TWIST_SLICE], h[THICKNESS_SLICE]]) for h in x_history])
+    return np.linalg.norm(history - x_star, axis=1) / np.linalg.norm(x_star)
 
 
-# optimality and feasibility after every sweep, and the error in the design after every block solve
-iterations = np.arange(1, len(opt.feas_history) + 1)
-
-fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(8, 2.5))
-ax1.semilogy(iterations, opt.opt_history, color='tab:blue', linewidth=2)
-ax1.set_xlabel('Iteration')
-ax1.set_ylabel('Optimality')
-ax1.grid(color='lavender', alpha=0.5, axis='y')
-
-ax2.semilogy(iterations, opt.feas_history, color='tab:orange', linewidth=2)
-ax2.set_xlabel('Iteration')
-ax2.set_ylabel('Feasibility')
-ax2.grid(color='lavender', alpha=0.5, axis='y')
-
-ax3.semilogy(error, linewidth=2, color='tab:red')
-ax3.set_xlabel('Iteration')
-ax3.set_ylabel('Relative error')
-ax3.grid(color='lavender', alpha=0.5, axis='y')
-
-plt.tight_layout()
-plt.show()
+if __name__ == "__main__":
+    opt = make_albcd()
+    opt.solve()
 
 
-# 3D view of the optimized wing, colored by pressure coefficient, on the Cessna 182 fuselage
-def_mesh = vlm_geom.apply_twist_rotation(mesh0_jnp, jnp.rad2deg(bspline_twist @ twist_cp),
-                                         ref_axis_pos=0.25, symmetry=False, rotate_x=True)
-out = solve_aero(def_mesh, v_inf, rho_atm, symmetry=False, with_viscous=False)
-cp = np.asarray(panel_pressure(out["mesh"], out["sec_forces"], out["normals"], orient="up")) / q
-vlm_grid = vlm_viz.to_pyvista_mesh(out["mesh"], cell_data={"Cp": cp})
 
-# the STL is in feet; scale to meters and place it under the wing
-cessna_mesh = pv.read(os.path.join(HERE, 'cessna182_no_wing.stl'))
-cessna_mesh = cessna_mesh.scale(0.3048, inplace=False).translate((-1.4, 0.0, -0.9), inplace=False)
+    twist_cp = opt.x[TWIST_SLICE]
+    thickness_cp = opt.x[THICKNESS_SLICE]
+    aero_loads_copy = opt.x[LOADS_SLICE]
 
-plotter = pv.Plotter(window_size=(2400, 1350))
-plotter.enable_anti_aliasing("ssaa")
-plotter.add_mesh(vlm_grid, scalars="Cp", cmap="coolwarm", show_edges=True)
-plotter.add_mesh(cessna_mesh, color="silver", show_edges=False)
+    _, _, lift = aero_model(twist_cp)
+    max_sigma_mpa, min_thickness_mm, weight = structures_model(aero_loads_copy, thickness_cp)
+    print('Max von Mises stress, (KS) (MPa): ', float(max_sigma_mpa))
+    print('Min thickness, (KS) (mm): ', float(min_thickness_mm))
+    print('Lift (N): ', float(lift), '  Weight (N): ', float(weight))
 
-# camera at azimuth 150 deg, elevation 30 deg, 1.5 bounding-box diagonals from the center
-plotter.camera_position = "iso"  # sets the bounds and focal point before they are overridden
-center = np.array(plotter.center)
-bounds = plotter.bounds
-distance = 1.5 * np.linalg.norm([bounds[1] - bounds[0], bounds[3] - bounds[2], bounds[5] - bounds[4]])
-az, el = np.radians(150), np.radians(30)
-direction = np.array([np.cos(el) * np.cos(az), np.cos(el) * np.sin(az), np.sin(el)])
-plotter.camera_position = [tuple(center + distance * direction), tuple(center), (0.0, 0.0, 1.0)]
+    # compare with the monolithic solution (the same problem solved with one SLSQP)
+    solution = np.load(os.path.join(HERE, 'monolithic_solution.npz'))
+    error = design_error(opt.x_history)
 
-plotter.show()
+    print('CD: ', opt.data['CD'])
+    print('CD (monolithic): ', float(solution['CD']))
+    print('Relative error: ', error[-1])
+
+    # convergence data, for fig_convergence.py. opt_history and feas_history have one entry per sweep;
+    # error has one per subproblem solve, and a leading entry for x0
+    np.savez(os.path.join(HERE, 'cessna_albcd.npz'),
+             opt_history=opt.opt_history, feas_history=opt.feas_history, error=error)
+
+
+    twist = np.array(bspline_twist @ twist_cp)
+    thickness = np.array(bspline_thickness @ thickness_cp)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 3))
+    ax1.plot(y, np.degrees(twist))
+    ax1.set_xlabel('Spanwise location (m)')
+    ax1.set_ylabel('Twist (deg)')
+    ax2.plot(0.5 * (y[:-1] + y[1:]), thickness * 1e3)
+    ax2.set_xlabel('Spanwise location (m)')
+    ax2.set_ylabel('Thickness (mm)')
+    plt.tight_layout()
+
+
+    # optimality and feasibility after every sweep, and the error in the design after every block solve
+    iterations = np.arange(1, len(opt.feas_history) + 1)
+
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(8, 2.5))
+    ax1.semilogy(iterations, opt.opt_history, color='tab:blue', linewidth=2)
+    ax1.set_xlabel('Iteration')
+    ax1.set_ylabel('Optimality')
+    ax1.grid(color='lavender', alpha=0.5, axis='y')
+
+    ax2.semilogy(iterations, opt.feas_history, color='tab:orange', linewidth=2)
+    ax2.set_xlabel('Iteration')
+    ax2.set_ylabel('Feasibility')
+    ax2.grid(color='lavender', alpha=0.5, axis='y')
+
+    ax3.semilogy(error, linewidth=2, color='tab:red')
+    ax3.set_xlabel('Iteration')
+    ax3.set_ylabel('Relative error')
+    ax3.grid(color='lavender', alpha=0.5, axis='y')
+
+    plt.tight_layout()
+    plt.show()
+
+
+    # 3D view of the optimized wing, colored by pressure coefficient, on the Cessna 182 fuselage
+    def_mesh = vlm_geom.apply_twist_rotation(mesh0_jnp, jnp.rad2deg(bspline_twist @ twist_cp),
+                                             ref_axis_pos=0.25, symmetry=False, rotate_x=True)
+    out = solve_aero(def_mesh, v_inf, rho_atm, symmetry=False, with_viscous=False)
+    cp = np.asarray(panel_pressure(out["mesh"], out["sec_forces"], out["normals"], orient="up")) / q
+    vlm_grid = vlm_viz.to_pyvista_mesh(out["mesh"], cell_data={"Cp": cp})
+
+    # the STL is in feet; scale to meters and place it under the wing
+    cessna_mesh = pv.read(os.path.join(HERE, 'cessna182_no_wing.stl'))
+    cessna_mesh = cessna_mesh.scale(0.3048, inplace=False).translate((-1.4, 0.0, -0.9), inplace=False)
+
+    plotter = pv.Plotter(window_size=(2400, 1350))
+    plotter.enable_anti_aliasing("ssaa")
+    plotter.add_mesh(vlm_grid, scalars="Cp", cmap="coolwarm", show_edges=True)
+    plotter.add_mesh(cessna_mesh, color="silver", show_edges=False)
+
+    # camera at azimuth 150 deg, elevation 30 deg, 1.5 bounding-box diagonals from the center
+    plotter.camera_position = "iso"  # sets the bounds and focal point before they are overridden
+    center = np.array(plotter.center)
+    bounds = plotter.bounds
+    distance = 1.5 * np.linalg.norm([bounds[1] - bounds[0], bounds[3] - bounds[2], bounds[5] - bounds[4]])
+    az, el = np.radians(150), np.radians(30)
+    direction = np.array([np.cos(el) * np.cos(az), np.cos(el) * np.sin(az), np.sin(el)])
+    plotter.camera_position = [tuple(center + distance * direction), tuple(center), (0.0, 0.0, 1.0)]
+
+    plotter.show()

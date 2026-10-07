@@ -14,7 +14,9 @@ from matplotlib.cm import ScalarMappable
 
 from models import nvar, setup_flight, simulate
 
-plt.rcParams.update({"font.size": 9, "axes.grid": True,
+plt.rcParams.update({"font.family": "STIXGeneral", "mathtext.fontset": "stix", "font.size": 10,
+                     "xtick.labelsize": 10, "ytick.labelsize": 10, "legend.fontsize": 8,
+                     "pdf.fonttype": 42, "axes.grid": True,
                      "axes.grid.axis": "y", "grid.color": "0.92", "axes.axisbelow": True})
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -41,9 +43,9 @@ for i in np.argsort(ranges):
     bx.barh(0, blocks[i][-1], left=left, height=0.7, color=color, edgecolor="w", lw=0.6)
     left += blocks[i][-1]
 
-ax.plot([], [], "k-", lw=1.4, label="With time limit")
+ax.plot([], [], "k-", lw=1.4, label="Time limit")
 ax.plot([], [], "k", label="Minimum fuel", **dashed)
-ax.legend(loc="lower center", ncol=2, fontsize=9, framealpha=0.9)
+ax.legend(loc="lower center", ncol=2, framealpha=0.9)
 ax.set(xlabel="Time (ks)", ylabel="Altitude (km)", xlim=(0, 1.01 * t_max), ylim=(3, 15))
 
 bx.axvline(T_budget, color="k", ls="--", lw=1)
