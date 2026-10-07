@@ -13,17 +13,10 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.ticker import NullLocator
 
-# plt.rcParams.update({"font.family": "STIXGeneral", "mathtext.fontset": "stix", "font.size": 10,
-#                      "xtick.labelsize": 10, "ytick.labelsize": 10, "legend.fontsize": 8, "legend.frameon": False,
-#                      "axes.linewidth": 0.6, "xtick.direction": "in", "ytick.direction": "in",
-#                      "xtick.top": True, "ytick.right": True, "xtick.major.width": 0.6, "ytick.major.width": 0.6,
-#                      "xtick.minor.width": 0.4, "ytick.minor.width": 0.4, "xtick.major.size": 3,
-#                      "ytick.major.size": 3, "xtick.minor.size": 1.5, "ytick.minor.size": 1.5, "pdf.fonttype": 42})
 plt.rcParams.update({"font.family": "STIXGeneral", "mathtext.fontset": "stix", "font.size": 10,
                      "xtick.labelsize": 10, "ytick.labelsize": 10, "legend.fontsize": 8,
                      "axes.linewidth": 0.6, "xtick.direction": "in", "ytick.direction": "in",
-                     "xtick.top": True, "ytick.right": True, "xtick.major.width": 0.6, "ytick.major.width": 0.6,
-                     "xtick.minor.width": 0.4, "ytick.minor.width": 0.4, "xtick.major.size": 3,
+                     "xtick.top": True, "ytick.right": True,
                      "ytick.major.size": 3, "xtick.minor.size": 1.5, "ytick.minor.size": 1.5, "pdf.fonttype": 42})
 
 HERE = os.path.dirname(os.path.abspath(__file__))
