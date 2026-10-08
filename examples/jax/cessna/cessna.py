@@ -77,16 +77,23 @@ def compile_subproblem(objective, local_constraints):
                     jax.jit(local_constraints), jax.jit(jax.jacrev(local_constraints)))
 
 
-def solve_slsqp(fns, args, v0, x_scaler, c_scaler, ftol, cl=0.0, cu=0.0):
-    """Minimize fns.obj(v, *args) s.t. cl <= fns.con(v) <= cu with modopt's SLSQP.
+def solve_slsqp(fns, args, v0, x_scaler, c_scaler, ftol, cl=0.0, cu=0.0, tau=0.0):
+    """Minimize fns.obj(v, *args) + tau/2 ||x_scaler * (v - v0)||^2 s.t. cl <= fns.con(v) <= cu
+    with modopt's SLSQP.
+
+    The second term is the optional proximal term of the ALBCD paper (Eq. 25), which penalizes
+    the distance from the block's current values v0. It is measured in the scaled variables that
+    SLSQP sees, so that the copies of the loads and weight (O(1e2-1e4) N) do not dominate the twist
+    and thickness. tau = 0 turns it off.
 
     Returns the solution, SLSQP's constraint multipliers and the constraint Jacobian at the solution.
     """
+    w = tau * x_scaler**2  # proximal weight on each unscaled variable
     # modopt passes numpy arrays; convert them so the compiled functions always see JAX
     # arrays, as they do in residual(). jax.jit compiles numpy and JAX arguments separately.
     prob = mo.ProblemLite(x0=v0,
-                          obj=lambda v: np.float64(fns.obj(jnp.asarray(v), *args)),
-                          grad=lambda v: np.array(fns.grad(jnp.asarray(v), *args)),
+                          obj=lambda v: np.float64(fns.obj(jnp.asarray(v), *args)) + 0.5 * np.sum(w * (v - v0)**2),
+                          grad=lambda v: np.array(fns.grad(jnp.asarray(v), *args)) + w * (v - v0),
                           con=lambda v: np.array(fns.con(jnp.asarray(v))),
                           jac=lambda v: np.array(fns.jac(jnp.asarray(v))),
                           x_scaler=x_scaler, cl=cl, cu=cu, c_scaler=c_scaler)
@@ -106,6 +113,7 @@ class AeroSubproblem(Subproblem):
     X_SCALER = np.concatenate([np.full(num_cp_twist, 10.0), [1e-3]])  # twist_cp, weight_copy
     C_SCALER = 1e-2  # lift = weight_copy
     FTOL = 1e-8      # SLSQP tolerance
+    tau = 0.0        # proximal coefficient, see solve_slsqp()
 
     def setup(self) -> None:
         self._fns = compile_subproblem(self.objective, self.local_constraints)
@@ -128,7 +136,7 @@ class AeroSubproblem(Subproblem):
 
         v_new, self._multipliers, self._jac_con = solve_slsqp(
             self._fns, (other, y, mu, weight),
-            np.array(self.decompose(x)), self.X_SCALER, self.C_SCALER, self.FTOL)
+            np.array(self.decompose(x)), self.X_SCALER, self.C_SCALER, self.FTOL, tau=self.tau)
 
         x_new = self.recompose(x, v_new)
         CD, aero_loads, _ = aero_model(v_new[:num_cp_twist])
@@ -155,6 +163,7 @@ class StructSubproblem(Subproblem):
     X_SCALER = np.concatenate([np.full(num_cp_thickness, 1e2), np.full(2 * num_nodes, 1e-2)])  # thickness_cp, loads
     C_SCALER = np.array([1e-2, 1e-1])  # KS stress, KS min thickness
     FTOL = 1e-8                        # SLSQP tolerance
+    tau = 0.0                          # proximal coefficient, see solve_slsqp()
 
     def setup(self) -> None:
         self._fns = compile_subproblem(self.objective, self.local_constraints)
@@ -180,7 +189,7 @@ class StructSubproblem(Subproblem):
         v_new, multipliers, self._jac_con = solve_slsqp(
             self._fns, (other, y, mu, aero_loads),
             np.array(self.decompose(x)), self.X_SCALER, self.C_SCALER, self.FTOL,
-            cl=np.full(2, -np.inf), cu=np.zeros(2))
+            cl=np.full(2, -np.inf), cu=np.zeros(2), tau=self.tau)
         # modopt hands SLSQP each upper-bounded inequality as cu - c(v) >= 0, with
         # Jacobian -J, so its multipliers enter the stationarity condition with the
         # opposite sign to the aero block's equality constraint
@@ -212,10 +221,13 @@ _, _, weight_init = structures_model(aero_loads_init, thickness_cp0)
 x0 = np.concatenate([twist_cp0, [float(weight_init)], thickness_cp0, np.array(aero_loads_init)])
 
 
-def make_albcd(rho=1.2, mu0=10.0, max_inner_iter=12, max_outer_iter=40):
+def make_albcd(rho=1.2, mu0=10.0, max_inner_iter=12, max_outer_iter=40, tau=0.0):
     """The ALBCD optimizer for this problem, with penalty growth factor rho, initial penalty mu0,
-    and at most max_inner_iter sweeps per outer iteration."""
-    return ALBCD(subproblems=[AeroSubproblem(AERO_INDEX), StructSubproblem(STRUCT_INDEX)],
+    at most max_inner_iter sweeps per outer iteration, and proximal coefficient tau in both subproblems."""
+    subproblems = [AeroSubproblem(AERO_INDEX), StructSubproblem(STRUCT_INDEX)]
+    for sub in subproblems:
+        sub.tau = tau
+    return ALBCD(subproblems=subproblems,
                  x0=x0,
                  mu0=np.full(N_CON, mu0),
                  data0={"weight": float(weight_init), "aero_loads": np.array(aero_loads_init), "CD": float(CD_init)},
