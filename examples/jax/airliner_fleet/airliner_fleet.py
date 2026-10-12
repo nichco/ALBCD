@@ -41,7 +41,7 @@ from models import nvar, cl, cu, xl, xu, x_scaler, setup_flight, flight_outputs,
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 # flights: range (m) and takeoff mass (kg) of each flight
-N = int(sys.argv[1]) if len(sys.argv) > 1 else 4  # number of flights
+N = int(sys.argv[1]) if len(sys.argv) > 1 else 6  # number of flights
 ranges, masses = qmc.scale(qmc.LatinHypercube(d=2, seed=0).random(N), [2000e3, 22000.0], [5000e3, 28000.0]).T
 flights = [setup_flight(rf, m0) for rf, m0 in zip(ranges, masses)]
 
@@ -195,28 +195,13 @@ cmap = ListedColormap(plt.cm.plasma(np.linspace(0, 0.85, 256)))
 norm = Normalize(ranges.min() / 1e6, ranges.max() / 1e6)
 colors = [cmap(norm(r / 1e6)) for r in ranges]
 
-# # altitude vs range
-# fig, ax = plt.subplots(figsize=(6.5, 3))
-# lines = [ax.plot([], [], color=c, lw=1.5, label=label)[0] for c, label in zip(colors, labels)]
-# ax.set(xlabel="Range (km)", ylabel="Altitude (km)", title=" ", xlim=(0, ranges.max() / 1e3), ylim=(0, 15))
-# ax.legend(loc="lower center", ncol=4, fontsize=8)
-# fig.tight_layout()
-
-# def update(k):
-#     for line, fl, s in zip(lines, flights, sims[k]):
-#         line.set_data(np.asarray(fl["r_nodes"]) / 1e3, np.asarray(s["h"]) / 1e3)
-#     ax.set_title(f"Sweep {k}")
-#     return lines
-
-# FuncAnimation(fig, update, frames=len(sweeps)).save(os.path.join(HERE, f"trajectories_N{N}.gif"), writer=PillowWriter(fps=4))
-
 # altitude vs time, with the block-time allocations stacked against the budget below
 fig, (ax, bx) = plt.subplots(2, 1, figsize=(6.5, 2.75),
                              gridspec_kw={"height_ratios": [3, 0.35], "hspace": 0.55})
 lines = [ax.plot([], [], color=c, lw=1.4)[0] for c in colors]
 t_max = max(float(s["t"][-1]) for sim in sims for s in sim) / 1e3
-ax.plot([], [], "k-", lw=1.4, label="With time limit")
-ax.legend(loc="lower center", ncol=2, fontsize=9, framealpha=0.9)
+ax.plot([], [], "k-", lw=1.4)
+# ax.legend(loc="lower center", ncol=2, fontsize=9, framealpha=0.9)
 ax.set(xlabel="Time (ks)", ylabel="Altitude (km)", xlim=(0, 1.01 * t_max), ylim=(3, 15))
 bars = bx.barh(0, tau_history[0], left=np.zeros(N), height=0.7,
                color=colors, edgecolor="w", lw=0.6)
@@ -224,6 +209,7 @@ bx.axvline(T_budget, color="k", ls="--", lw=1)
 bx.text(T_budget, 1.02, "Time limit", transform=bx.get_xaxis_transform(), ha="center", va="bottom", fontsize=8)
 bx.set(xlabel="Cumulative block time (ks)", yticks=[], xlim=(0, 1.1 * max(tau_history.sum(1).max(), T_budget)))
 bx.grid(False)
+fig.subplots_adjust(top=0.95, bottom=0.17)  # room for the bar's label: the gif is saved at the figure size, not trimmed
 
 cb = fig.colorbar(ScalarMappable(norm, cmap), ax=[ax, bx], pad=0.04, aspect=30)
 cb.set_label("Range (1000 km)")
@@ -236,4 +222,7 @@ def update_time(k):
         bar.set_x(l), bar.set_width(w)
     return lines + list(bars)
 
-FuncAnimation(fig, update_time, frames=len(sweeps)).save(os.path.join(HERE, f"trajectories_time_N{N}.gif"), writer=PillowWriter(fps=4))
+FuncAnimation(fig, update_time, 
+              frames=len(sweeps)).save(os.path.join(HERE, f"trajectories_time_N{N}.gif"), 
+              writer=PillowWriter(fps=4),
+              dpi=200)
