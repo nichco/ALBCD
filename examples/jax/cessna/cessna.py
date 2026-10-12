@@ -77,14 +77,14 @@ def compile_subproblem(objective, local_constraints):
                     jax.jit(local_constraints), jax.jit(jax.jacrev(local_constraints)))
 
 
-def solve_slsqp(fns, args, v0, x_scaler, c_scaler, ftol, cl=0.0, cu=0.0, tau=0.0):
+def solve_slsqp(fns, args, v0, x_scaler, c_scaler, ftol, cl=0.0, cu=0.0, tau=0.0, xl=None):
     """Minimize fns.obj(v, *args) + tau/2 ||x_scaler * (v - v0)||^2 s.t. cl <= fns.con(v) <= cu
     with modopt's SLSQP.
 
     The second term is the optional proximal term of the ALBCD paper (Eq. 25), which penalizes
     the distance from the block's current values v0. It is measured in the scaled variables that
     SLSQP sees, so that the copies of the loads and weight (O(1e2-1e4) N) do not dominate the twist
-    and thickness. tau = 0 turns it off.
+    and thickness. tau = 0 turns it off. xl are optional lower bounds on v.
 
     Returns the solution, SLSQP's constraint multipliers and the constraint Jacobian at the solution.
     """
@@ -96,7 +96,7 @@ def solve_slsqp(fns, args, v0, x_scaler, c_scaler, ftol, cl=0.0, cu=0.0, tau=0.0
                           grad=lambda v: np.array(fns.grad(jnp.asarray(v), *args)) + w * (v - v0),
                           con=lambda v: np.array(fns.con(jnp.asarray(v))),
                           jac=lambda v: np.array(fns.jac(jnp.asarray(v))),
-                          x_scaler=x_scaler, cl=cl, cu=cu, c_scaler=c_scaler)
+                          xl=xl, x_scaler=x_scaler, cl=cl, cu=cu, c_scaler=c_scaler)
     optimizer = mo.SLSQP(prob, solver_options={'maxiter': 1000, 'ftol': ftol}, turn_off_outputs=True)
     optimizer.solve()
     v = optimizer.results['x'] / x_scaler
@@ -164,6 +164,12 @@ class StructSubproblem(Subproblem):
     C_SCALER = np.array([1e-2, 1e-1])  # KS stress, KS min thickness
     FTOL = 1e-8                        # SLSQP tolerance
     tau = 0.0                          # proximal coefficient, see solve_slsqp()
+    # lower bound on the thickness control points (m), so that SLSQP's iterates cannot step to a
+    # negative wall thickness, where the beam model is meaningless. The B-spline is a convex
+    # combination of its control points, so this bounds the thickness everywhere. It is far below
+    # the minimum gauge, so it is inactive at the solution.
+    THICKNESS_MIN = 0.0
+    XL = np.concatenate([np.full(num_cp_thickness, THICKNESS_MIN), np.full(2 * num_nodes, -np.inf)])
 
     def setup(self) -> None:
         self._fns = compile_subproblem(self.objective, self.local_constraints)
@@ -189,7 +195,7 @@ class StructSubproblem(Subproblem):
         v_new, multipliers, self._jac_con = solve_slsqp(
             self._fns, (other, y, mu, aero_loads),
             np.array(self.decompose(x)), self.X_SCALER, self.C_SCALER, self.FTOL,
-            cl=np.full(2, -np.inf), cu=np.zeros(2), tau=self.tau)
+            cl=np.full(2, -np.inf), cu=np.zeros(2), tau=self.tau, xl=self.XL)
         # modopt hands SLSQP each upper-bounded inequality as cu - c(v) >= 0, with
         # Jacobian -J, so its multipliers enter the stationarity condition with the
         # opposite sign to the aero block's equality constraint

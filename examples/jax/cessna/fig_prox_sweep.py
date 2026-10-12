@@ -30,19 +30,17 @@ fig, (opt, feas, err) = plt.subplots(1, 3, figsize=(7, 2), sharex=True)
 for k, tau in enumerate(d["tau"]):
     sweeps = np.arange(1, len(d["feas_history"][k]) + 1)
     style = dict(color=colors[k % 6], ls=linestyles[k % 6], marker=markers[k % 6], lw=1.2, ms=3, mfc="w",
-                 mew=0.8, markevery=4)
+                 mew=0.8, markevery=(0.02 * k, 0.1))  # every 10% of the axes diagonal, staggered by line
     opt.plot(sweeps, d["opt_history"][k], label=tau_label(tau), **style)
     feas.plot(sweeps, d["feas_history"][k], **style)
-    err.plot(np.arange(len(d["error"][k])) / n, d["error"][k], **{**style, "markevery": 4 * n})
+    err.plot(np.arange(len(d["error"][k])) / n, d["error"][k], **style)
 
-for a, label, tag in ((opt, "Optimality residual", "a"), (feas, "Feasibility", "b"),
-                      (err, "Relative error in $x$", "c")):
+for a, label in ((opt, "Optimality residual"), (feas, "Feasibility"), (err, "Relative error in $x$")):
     a.set_yscale("log")
     a.xaxis.set_minor_locator(NullLocator())
     a.yaxis.set_minor_locator(NullLocator())
     a.set_ylabel(label)
     a.set_xlabel("Iteration")
-    a.set_title(f"({tag})", fontsize=10, loc="left")
 
 fig.legend(*opt.get_legend_handles_labels(), loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=5,
            handlelength=2.6, frameon=False)

@@ -21,22 +21,20 @@ d = np.load(os.path.join(HERE, "cessna_inner_iter_budget.npz"), allow_pickle=Tru
 fig, (opt, feas, err) = plt.subplots(1, 3, figsize=(7, 2), sharex=True)
 for k, n_inner in enumerate(d["max_inner_iter"]):
     style = dict(color=colors[k % 4], ls=linestyles[k % 4], marker=markers[k % 4], lw=1.2, ms=3, mfc="w",
-                 mew=0.8, markevery=16)
+                 mew=0.8, markevery=(0.02 * k, 0.1))  # every 10% of the axes diagonal, staggered by line
     label = rf"$n_\mathrm{{inner}} = {n_inner}$" + (" (ADMM)" if n_inner == 1 else "")
     # optimality and feasibility at the end of each sweep (every n subproblem solves), error after each subproblem solve
     solves = n * np.arange(1, len(d["feas_history"][k]) + 1)
     opt.plot(solves, d["opt_history"][k], label=label, **style)
     feas.plot(solves, d["feas_history"][k], **style)
-    err.plot(np.arange(len(d["error"][k])), d["error"][k], **{**style, "markevery": 16 * n})
+    err.plot(np.arange(len(d["error"][k])), d["error"][k], **style)
 
-for a, label, tag in ((opt, "Optimality residual", "a"), (feas, "Feasibility", "b"),
-                      (err, "Relative error in $x$", "c")):
+for a, label in ((opt, "Optimality residual"), (feas, "Feasibility"), (err, "Relative error in $x$")):
     a.set_yscale("log")
     a.xaxis.set_minor_locator(NullLocator())
     a.yaxis.set_minor_locator(NullLocator())
     a.set_ylabel(label)
     a.set_xlabel("Subproblem solves")
-    a.set_title(f"({tag})", fontsize=10, loc="left")
 
 fig.legend(*opt.get_legend_handles_labels(), loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=4,
            handlelength=2.6, frameon=False)

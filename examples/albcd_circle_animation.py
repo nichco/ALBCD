@@ -1,20 +1,4 @@
 # Distribution Statement A. Approved for public release: distribution is unlimited. Approved AFRL-2026-1671 28-09-2026.
-
-"""Video of ALBCD solving the quick start problem (see quadratic_global_circle.py):
-
-    min x1^2 + x2^2 - 1.5 x1 x2  s.t.  x1^2 + x2^2 >= 0.25
-
-Block 1 owns (x1, s) and block 2 owns x2, so in the (x1, x2) plane block 1 moves the
-iterate horizontally and block 2 vertically. The background is the augmented Lagrangian
-minimized over the slack s; it morphs each time the multiplier y and penalty mu are
-updated, until its minimum lies on the constraint circle. The right plots show the
-feasibility and optimality after each BCD sweep.
-
-Needs modopt, matplotlib and ffmpeg (on the PATH, via imageio-ffmpeg, or pass --ffmpeg):
-
-    python examples/circle_animation.py [-o out.mp4] [--ffmpeg path/to/ffmpeg]
-"""
-
 import argparse
 import shutil
 from pathlib import Path
