@@ -23,8 +23,11 @@ ROSENBROCK_LOCAL = [-0.4536, 0.2105]
 SOLUTIONS = {
     "quadratic_global_linear.py": [0, 0, 0],
     "quadratic_global_linear_cvxopt.py": [0, 0, 0],
+    "quadratic_global_failure.py": [-0.5, -1],  # where plain BCD stalls, not the optimum (the origin)
+    "no_feasible_solution.py": [0, 0],
     "quadratic_global_circle.py": [R, 0, R],
     "quadratic_consensus_circle.py": [R, R, R, R],
+    "quadratic_consensus_linear.py": [0, 0, 0, 0],
     "rosenbrock_consensus.py": ROSENBROCK_LOCAL * 2,
     "proximal_rosenbrock_consensus.py": ROSENBROCK_LOCAL * 2,
     "2d_rosenbrock.py": [1, 1],

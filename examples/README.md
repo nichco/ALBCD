@@ -16,7 +16,10 @@ and run any example directly, e.g. `python examples/pytorch/rosenbrock_consensus
 | `quadratic_global_circle.py` | Quadratic objective with a nonlinear inequality coupling two blocks via a slack variable. |
 | `quadratic_global_linear.py` | Quadratic objective with a linear inequality coupling two blocks. |
 | `quadratic_global_linear_cvxopt.py` | Same problem as `quadratic_global_linear.py`, but each block is solved by CVXOPT using exact Hessians instead of SLSQP. |
+| `quadratic_global_failure.py` | Same problem as `quadratic_global_linear.py`, but run as plain BCD with the coupling constraint handled locally in each block; it stalls on the constraint line at (-0.5, -1) instead of reaching the origin. |
+| `no_feasible_solution.py` | Plain BCD with the two wedge constraints `x1 - 0.5 x2 >= 0` and `x1 + 0.5 x2 >= 0` handled locally in each block; block 2's local problem is infeasible when `x1 < 0`. From (1, 0.5) the iterates zigzag to the origin. |
 | `quadratic_consensus_circle.py` | Consensus form: each block owns a full copy of the variables and handles the circle constraint locally, with coupling constraints forcing the copies to agree. |
+| `quadratic_consensus_linear.py` | Same consensus setup as `quadratic_consensus_circle.py`, but each block handles the linear constraint `x1 - 0.5 x2 >= 0` locally. |
 | `rosenbrock_consensus.py` | Consensus form of the nonconvex Rosenbrock function. |
 | `proximal_rosenbrock_consensus.py` | Same problem as `rosenbrock_consensus.py`, with a proximal term added to each block's subproblem for stabilization. |
 | `2d_rosenbrock.py` | Unconstrained (`unconstrained=True`) two-dimensional Rosenbrock function with one variable per block: plain block coordinate descent zigzags along the valley to the minimum. |
