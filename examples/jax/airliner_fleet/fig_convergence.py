@@ -29,14 +29,13 @@ for k, n in enumerate(sizes):
         err.plot(np.arange(len(d["error"])) / n, d["error"], **{**style, "markevery": 4 * n})
 
 
-for a, label, tag in ((opt, "Optimality residual", "a"), (feas, "Feasibility", "b"),
-                      (err, "Relative error in $x$", "c")):
+for a, label in ((opt, "Optimality residual"), (feas, "Feasibility"),
+                 (err, "Relative error in $x$")):
     a.set_yscale("log")
     a.xaxis.set_minor_locator(NullLocator())
     a.yaxis.set_minor_locator(NullLocator())
     a.set_ylabel(label)
     a.set_xlabel("Iteration")
-    a.set_title(f"({tag})", fontsize=10, loc="left")
 
 err.legend(*opt.get_legend_handles_labels(), loc="upper right", handlelength=2.6)
 
