@@ -31,7 +31,8 @@ warnings.filterwarnings("ignore")
 
 from models import (aero_model, structures_model, twist_cp0, thickness_cp0, strut_thickness0, num_cp_twist,
                     num_cp_thickness, num_struts, num_nodes, num_left_elems, bspline_twist, bspline_thickness,
-                    min_gauge, sigma_yield_mpa, y, y_spar_elem, q, v_inf, rho_atm, mesh0_jnp, vlm_geom, solve_aero)
+                    min_gauge, sigma_yield_mpa, y, y_spar_elem, q, v_inf, rho_atm, mesh0_jnp, vlm_geom, solve_aero,
+                    thickness_min, thickness_max, strut_thickness_max)
 from vlm_jax import viz as vlm_viz
 from vlm_jax.analysis import panel_pressure
 
@@ -78,8 +79,8 @@ def compile_subproblem(objective, local_constraints):
                     jax.jit(local_constraints), jax.jit(jax.jacrev(local_constraints)))
 
 
-def solve_slsqp(fns, args, v0, x_scaler, c_scaler, ftol, cl=0.0, cu=0.0, tau=0.0):
-    """Minimize fns.obj(v, *args) + tau/2 ||x_scaler * (v - v0)||^2 s.t. cl <= fns.con(v) <= cu
+def solve_slsqp(fns, args, v0, x_scaler, c_scaler, ftol, cl=0.0, cu=0.0, tau=0.0, xl=None, xu=None):
+    """Minimize fns.obj(v, *args) + tau/2 ||x_scaler * (v - v0)||^2 s.t. cl <= fns.con(v) <= cu, xl <= v <= xu
     with modopt's SLSQP.
 
     The second term is the optional proximal term of the ALBCD paper (Eq. 25), which penalizes
@@ -97,7 +98,7 @@ def solve_slsqp(fns, args, v0, x_scaler, c_scaler, ftol, cl=0.0, cu=0.0, tau=0.0
                           grad=lambda v: np.array(fns.grad(jnp.asarray(v), *args)) + w * (v - v0),
                           con=lambda v: np.array(fns.con(jnp.asarray(v))),
                           jac=lambda v: np.array(fns.jac(jnp.asarray(v))),
-                          x_scaler=x_scaler, cl=cl, cu=cu, c_scaler=c_scaler)
+                          xl=xl, xu=xu, x_scaler=x_scaler, cl=cl, cu=cu, c_scaler=c_scaler)
     optimizer = mo.SLSQP(prob, solver_options={'maxiter': 1000, 'ftol': ftol}, turn_off_outputs=True)
     optimizer.solve()
     v = optimizer.results['x'] / x_scaler
@@ -166,6 +167,15 @@ class StructSubproblem(Subproblem):
     C_SCALER = np.array([1e-2, 1e-1])  # KS stress, KS min thickness
     FTOL = 1e-8                        # SLSQP tolerance
     tau = 0.0                          # proximal coefficient, see solve_slsqp()
+    # bounds on the spar thickness control points and the strut thicknesses (m), so that SLSQP's iterates
+    # stay where the tube model is physical: a positive wall (a zero wall makes the frame singular), and a
+    # wall no thicker than the tube radius (beyond t = r the inner radius is negative, so the area
+    # pi t (2r - t) shrinks as the wall thickens and goes negative past t = 2r). The spar thickness is a
+    # B-spline, a convex combination of its control points, so its bounds hold everywhere. All are inactive
+    # at the solution.
+    XL = np.concatenate([np.full(NUM_SIZING, thickness_min), np.full(2 * num_nodes, -np.inf)])
+    XU = np.concatenate([np.full(num_cp_thickness, thickness_max), np.full(num_struts, strut_thickness_max),
+                         np.full(2 * num_nodes, np.inf)])
 
     def setup(self) -> None:
         self._fns = compile_subproblem(self.objective, self.local_constraints)
@@ -196,7 +206,7 @@ class StructSubproblem(Subproblem):
         v_new, multipliers, self._jac_con = solve_slsqp(
             self._fns, (other, y, mu, aero_loads),
             np.array(self.decompose(x)), self.X_SCALER, self.C_SCALER, self.FTOL,
-            cl=np.full(2, -np.inf), cu=np.zeros(2), tau=self.tau)
+            cl=np.full(2, -np.inf), cu=np.zeros(2), tau=self.tau, xl=self.XL, xu=self.XU)
         # modopt hands SLSQP each upper-bounded inequality as cu - c(v) >= 0, with
         # Jacobian -J, so its multipliers enter the stationarity condition with the
         # opposite sign to the aero block's equality constraint

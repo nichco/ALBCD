@@ -6,8 +6,10 @@
 """
 
 from .albcd import ALBCD
+from .alc import ALC, initial_penalty
+from .admm import ADMM
 from .subproblem import Subproblem
 
 __version__ = "0.1.0"
 
-__all__ = ["ALBCD", "Subproblem"]
+__all__ = ["ALBCD", "ALC", "ADMM", "initial_penalty", "Subproblem"]

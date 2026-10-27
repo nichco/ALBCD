@@ -72,6 +72,16 @@ t_over_c = 0.1   # airfoil thickness-to-chord ratio, sets the spar tube radius
 r = t_over_c * (chords0[:-1] + chords0[1:]) / 4   # tube radius of every VLM strip (m)
 r_spar = r[spar_elems]
 r_strut = 0.025  # strut tube radius (m)
+# largest admissible wall thicknesses: the smallest spar tube radius and the strut radius. A thicker wall
+# than the radius makes the tube model unphysical (its area pi t (2r - t) shrinks as t grows and goes
+# negative past t = 2r), so the thickness variables are bounded above by these (inactive at the optimum)
+thickness_max = float(np.min(np.asarray(r_spar)))
+strut_thickness_max = r_strut
+# smallest admissible wall thickness, for the spar control points and the struts: small but positive,
+# since a zero wall has zero area and makes the frame's stiffness matrix singular (an SLSQP iterate
+# clipped to t = 0 then stalls the structures block). Far below the 1 mm minimum gauge, and below the
+# smallest optimal control point (0.12 mm), so it is inactive at the optimum.
+thickness_min = 1e-5
 E = 69e9
 G = 26e9
 rho_mat = 3000

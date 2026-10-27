@@ -40,6 +40,10 @@ fixed_nodes = [num_nodes // 2] # the center node is fixed in all DOFs
 _, _, chords0, _, _, _, _ = vlm_aero.vlm_geometry(mesh0_torch, symmetry=False)
 t_over_c = 0.1   # airfoil thickness-to-chord ratio, sets the spar tube radius
 r = t_over_c * (chords0[:-1] + chords0[1:]) / 4
+# largest admissible wall thickness: the smallest tube radius. A thicker wall than the radius makes the
+# tube model unphysical (its area pi t (2r - t) shrinks as t grows and goes negative past t = 2r), so
+# the thickness control points are bounded above by this (inactive at the optimum)
+thickness_max = float(torch.min(r))
 E = 69e9
 G = 26e9
 rho_mat = 3000

@@ -17,7 +17,7 @@ warnings.filterwarnings("ignore")
 
 from models import (aero_model, structures_model, twist_cp0, thickness_cp0, num_cp_twist, num_cp_thickness,
                     bspline_twist, bspline_thickness, min_gauge, sigma_yield_mpa, y, b, v_inf, rho_atm,
-                    mesh0_torch, vlm_geom, vlm_aero, solve_aero)
+                    mesh0_torch, vlm_geom, vlm_aero, solve_aero, thickness_max)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -41,8 +41,11 @@ cl = np.array([-np.inf, 0.0, -np.inf])  # stress <= yield, lift = weight, thickn
 cu = np.array([0.0, 0.0, 0.0])
 c_scaler = np.array([1e-2, 1e-2, 1e-1])
 x_scaler = np.concatenate([10 * np.ones(num_cp_twist), 100 * np.ones(num_cp_thickness)])
+# the same thickness bounds as the structures block in cessna.py: 0 <= thickness_cp <= thickness_max
+xl = np.concatenate([np.full(num_cp_twist, -np.inf), np.zeros(num_cp_thickness)])
+xu = np.concatenate([np.full(num_cp_twist, np.inf), np.full(num_cp_thickness, thickness_max)])
 
-prob = mo.ProblemLite(x0=x0,
+prob = mo.ProblemLite(x0=x0, xl=xl, xu=xu,
                       obj=lambda x: np.float64(objective(torch.as_tensor(x))),
                       grad=lambda x: np.array(torch.func.grad(objective)(torch.as_tensor(x))),
                       con=lambda x: np.array(constraints(torch.as_tensor(x))),

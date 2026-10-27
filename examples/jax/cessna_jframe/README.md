@@ -28,7 +28,7 @@ centerline:
 
 Bracing the wing cuts the optimal spar mass from 108 kg (the cantilever of `../cessna/`) to
 29 kg, plus 3 kg of struts (1.8 mm walls), so the wing needs less lift and its drag
-coefficient drops from 0.00547 to 0.00471. ALBCD, with the same settings as `../cessna/`,
+coefficient drops from 0.00547 to 0.00472. ALBCD, with the same settings as `../cessna/`,
 converges in 9 outer iterations (51 sweeps) to within 0.13% of the monolithic design.
 
 Each subproblem compiles its objective, local constraints and their derivatives once with

@@ -29,7 +29,7 @@ warnings.filterwarnings("ignore")
 
 from models import (aero_model, structures_model, twist_cp0, thickness_cp0, num_cp_twist, num_cp_thickness,
                     num_nodes, bspline_twist, bspline_thickness, min_gauge, sigma_yield_mpa, y, q, v_inf, rho_atm,
-                    mesh0_torch, vlm_geom, solve_aero)
+                    mesh0_torch, vlm_geom, solve_aero, thickness_max)
 from vlm_torch import viz as vlm_viz
 from vlm_torch.analysis import panel_pressure
 
@@ -58,8 +58,8 @@ def coupling(aero_loads, aero_loads_copy, weight, weight_copy):
                       w_scale * (weight - weight_copy).reshape(1)])
 
 
-def solve_slsqp(obj, con, v0, x_scaler, c_scaler, ftol, cl=0.0, cu=0.0):
-    """Minimize obj(v) s.t. cl <= con(v) <= cu with modopt's SLSQP, using PyTorch derivatives.
+def solve_slsqp(obj, con, v0, x_scaler, c_scaler, ftol, cl=0.0, cu=0.0, xl=None, xu=None):
+    """Minimize obj(v) s.t. cl <= con(v) <= cu, xl <= v <= xu with modopt's SLSQP, using PyTorch derivatives.
 
     Returns the solution, SLSQP's constraint multipliers and the constraint Jacobian at the solution.
     """
@@ -68,7 +68,7 @@ def solve_slsqp(obj, con, v0, x_scaler, c_scaler, ftol, cl=0.0, cu=0.0):
                           grad=lambda v: np.array(torch.func.grad(obj)(torch.as_tensor(v))),
                           con=lambda v: np.array(con(torch.as_tensor(v))),
                           jac=lambda v: np.array(torch.func.jacrev(con)(torch.as_tensor(v))),
-                          x_scaler=x_scaler, cl=cl, cu=cu, c_scaler=c_scaler)
+                          xl=xl, xu=xu, x_scaler=x_scaler, cl=cl, cu=cu, c_scaler=c_scaler)
     optimizer = mo.SLSQP(prob, solver_options={'maxiter': 1000, 'ftol': ftol}, turn_off_outputs=True)
     optimizer.solve()
     v = optimizer.results['x'] / x_scaler
@@ -132,6 +132,13 @@ class StructSubproblem(Subproblem):
     X_SCALER = np.concatenate([np.full(num_cp_thickness, 1e2), np.full(2 * num_nodes, 1e-2)])  # thickness_cp, loads
     C_SCALER = np.array([1e-2, 1e-1])  # KS stress, KS min thickness
     FTOL = 1e-8                        # SLSQP tolerance
+    # bounds on the thickness control points (m), so that SLSQP's iterates stay where the tube model is
+    # physical: a nonnegative wall, and a wall no thicker than the tube radius (beyond t = r the inner
+    # radius is negative, so the area pi t (2r - t) shrinks as the wall thickens and goes negative past
+    # t = 2r). The B-spline is a convex combination of its control points, so these bound the thickness
+    # everywhere. Both are inactive at the solution.
+    XL = np.concatenate([np.zeros(num_cp_thickness), np.full(2 * num_nodes, -np.inf)])
+    XU = np.concatenate([np.full(num_cp_thickness, thickness_max), np.full(2 * num_nodes, np.inf)])
 
     def objective(self, v, other, y, mu, aero_loads):
         thickness_cp, aero_loads_copy = v[:num_cp_thickness], v[num_cp_thickness:]
@@ -154,7 +161,7 @@ class StructSubproblem(Subproblem):
         v_new, multipliers, self._jac_con = solve_slsqp(
             lambda v: self.objective(v, other, y, mu, aero_loads), self.local_constraints,
             np.array(self.decompose(x)), self.X_SCALER, self.C_SCALER, self.FTOL,
-            cl=np.full(2, -np.inf), cu=np.zeros(2))
+            cl=np.full(2, -np.inf), cu=np.zeros(2), xl=self.XL, xu=self.XU)
         # modopt hands SLSQP each upper-bounded inequality as cu - c(v) >= 0, with
         # Jacobian -J, so its multipliers enter the stationarity condition with the
         # opposite sign to the aero block's equality constraint
