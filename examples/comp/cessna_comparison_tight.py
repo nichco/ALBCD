@@ -1,33 +1,39 @@
-"""ALBCD, ALC and ADMM on the Cessna problem of examples/jax/cessna, from small penalties and with
-tight tolerances, so that it is clear which methods converge and which stall.
+"""ALBCD, ALC and ADMM (a small and a large penalty) on the Cessna problem of examples/jax/cessna, with
+tight tolerances and the same budget of BCD sweeps for every method, so that it is clear which
+methods converge and which stall.
 
-    python cessna_comparison_tight.py [albcd] [alc] [admm]      (no argument: all three)
+    python cessna_comparison_tight.py [RUN ...] [--sweeps N] [--out FILE]
+
+RUN is albcd, alc, admm_small, admm_large or admm=MU (any fixed penalty); no RUN runs the first four.
 
 Compared with cessna_comparison.py (the example's settings):
 
 - the blocks' SLSQP tolerance is 1e-13 instead of 1e-8, so a block solve does not stop before the
   block has moved (at 1e-8 the blocks freeze at small penalties, whatever the method)
-- the stopping tolerances are feasibility 1e-5 and optimality 3e-5
-- all three methods start from small penalties: ALBCD mu0 = 0.1, ADMM a fixed mu = 0.1, ALC the
-  initial weight of its Eq. 29
+- every method runs exactly N BCD sweeps (one sweep = one solve of each block: aero, then
+  structures). Their stopping tests are switched off, and each run records the sweep at which its
+  own test (feasibility 1e-5, optimality 3e-5 for ALBCD and ADMM; ALC's Eqs. 26-27 with
+  epsilon = 1e-5) would have stopped it. Past that sweep every method keeps running its own
+  iteration unchanged: ALBCD more outer iterations of its final phase, ALC more outer iterations
+  with its Eq. 25 weight update, ADMM more sweeps with its fixed penalty
+- ALBCD starts from mu0 = 0.1 and ALC from the initial weight of its Eq. 29
 - the error is measured against a monolithic solution solved here with SLSQP ftol 1e-14 (the
-  example's monolithic_solution.npz is solved with ftol 1e-8 and is about 7e-5 from it, more than
-  ALBCD's final error)
+  example's monolithic_solution.npz is solved with ftol 1e-8 and is about 7e-5 from it)
 
-Every history has one entry per BCD sweep (one solve of each block: aero, then structures). The
-methods differ in how many sweeps they run between multiplier updates: ALBCD and ALC run an inner
-loop of one or more sweeps, ADMM updates after every sweep. Each run records the sweeps after which
-its multipliers were updated, and the cumulative SLSQP iterations after every sweep (a cost that
-does not depend on how the work is split into sweeps).
+Every history has one entry per sweep. The methods differ in how many sweeps they run between
+multiplier updates: ALBCD and ALC run an inner loop of one or more sweeps, ADMM updates after every
+sweep. Each run records the sweeps after which its multipliers were updated, and the cumulative
+SLSQP iterations after every sweep (a cost that does not depend on how work is split into sweeps).
 
-Writes cessna_comparison_tight.npz (keys <method>_<field>, plus the reference ref_x and ref_CD),
-which fig_cessna_comparison_tight.py plots. A run of some methods keeps the others' results in the
-file. ADMM runs to its 2000-sweep limit, which takes much longer than the other two.
+Writes cessna_comparison_tight.npz (keys <run>_<field>, plus the reference ref_x and ref_CD), which
+fig_cessna_comparison_tight.py plots. A run of some methods keeps the others' results in the file,
+so the runs can go in separate processes.
 """
 
 import os
 import sys
 import time
+import argparse
 
 # single-threaded BLAS and XLA, so that the runs are reproducible
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
@@ -44,13 +50,38 @@ import cessna as C  # noqa: E402  (the example; its __main__ block does not run 
 from albcd import ALBCD, ALC, ADMM, initial_penalty  # noqa: E402
 
 FTOL = 1e-13      # blocks' SLSQP tolerance
-FEAS_TOL = 1e-5   # feasibility tolerance of all three methods (ALC's epsilon, ADMM's primal tolerance)
+FEAS_TOL = 1e-5   # feasibility tolerance (ALC's epsilon, ADMM's primal tolerance)
 OPT_TOL = 3e-5    # optimality tolerance: ALBCD's final phase, ADMM's dual tolerance
-MU = 0.1          # ALBCD's initial penalty and ADMM's fixed penalty
-OUT = os.path.join(HERE, "cessna_comparison_tight.npz")
+MU_ALBCD = 0.1    # ALBCD's initial penalty
+MU_ADMM = {"admm_small": 0.1, "admm_large": 10.0}  # ADMM's fixed penalties
 
-methods = sys.argv[1:] or ["albcd", "alc", "admm"]
-saved = dict(np.load(OUT)) if os.path.exists(OUT) else {}
+parser = argparse.ArgumentParser()
+parser.add_argument("runs", nargs="*", default=["albcd", "alc", "admm_small", "admm_large"])
+parser.add_argument("--sweeps", type=int, default=1000, help="BCD sweeps per run")
+parser.add_argument("--out", default=os.path.join(HERE, "cessna_comparison_tight.npz"))
+args = parser.parse_args()
+N_SWEEPS, OUT = args.sweeps, args.out
+
+
+# --- results file, shared by runs in separate processes ---
+
+def update_results(new):
+    """Merge new entries into OUT under a lock file, keeping what other runs wrote."""
+    lock = OUT + ".lock"
+    while True:
+        try:
+            fd = os.open(lock, os.O_CREAT | os.O_EXCL)
+            break
+        except FileExistsError:
+            time.sleep(0.5)
+    try:
+        saved = dict(np.load(OUT)) if os.path.exists(OUT) else {}
+        saved.update(new)
+        np.savez(OUT, **saved)
+        return saved
+    finally:
+        os.close(fd)
+        os.remove(lock)
 
 
 # --- tight monolithic reference: the problem of examples/jax/cessna/monolithic.py with ftol 1e-14 ---
@@ -80,9 +111,12 @@ def reference():
     return z, float(objective(z))
 
 
-if "ref_x" not in saved:
-    saved["ref_x"], saved["ref_CD"] = reference()
-ref = saved["ref_x"]
+saved = dict(np.load(OUT)) if os.path.exists(OUT) else {}
+if "ref_x" in saved:
+    ref = saved["ref_x"]
+else:
+    ref, ref_CD = reference()
+    update_results({"ref_x": ref, "ref_CD": ref_CD})
 
 
 def design_error(x_history):
@@ -91,7 +125,7 @@ def design_error(x_history):
     return np.linalg.norm(h - ref, axis=1) / np.linalg.norm(ref)
 
 
-# --- cost: cumulative SLSQP iterations after every sweep ---
+# --- sweep budget and cost: cumulative SLSQP iterations after every sweep ---
 
 SLSQP_ITERS = [0]
 _slsqp_solve = mo.SLSQP.solve
@@ -107,29 +141,58 @@ mo.SLSQP.solve = counted_solve
 nit_history = []  # SLSQP_ITERS after every sweep
 
 
-def subproblems():
+class BudgetSpent(Exception):
+    """Raised at the start of sweep N_SWEEPS + 1, which ends the run with exactly N_SWEEPS sweeps."""
+
+
+def subproblems(budget=True):
     subs = [C.AeroSubproblem(C.AERO_INDEX), C.StructSubproblem(C.STRUCT_INDEX)]
     for sub in subs:
         sub.FTOL = FTOL
-    last = subs[-1].solve  # the struct block ends every sweep
+    first, last = subs[0].solve, subs[-1].solve  # aero starts every sweep, struct ends it
 
-    def solve(*args, **kwargs):
-        last(*args, **kwargs)
+    def solve_first(*a, **k):
+        if budget and len(nit_history) >= N_SWEEPS:
+            raise BudgetSpent
+        first(*a, **k)
+
+    def solve_last(*a, **k):
+        last(*a, **k)
         nit_history.append(SLSQP_ITERS[0])
-    subs[-1].solve = solve
+    subs[0].solve, subs[-1].solve = solve_first, solve_last
     return subs
 
 
 class RecordingALBCD(ALBCD):
-    """ALBCD that records the sweeps after which it updates its multipliers."""
+    """ALBCD that records its multiplier updates and where its stopping test would stop it.
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.updates = []
+    It runs with the phase tolerances [1e-1, OPT_TOL, OPT_TOL, ...]: a phase ends when an outer
+    iteration ends feasible, which in the final phase is where ALBCD stops. With repeated final
+    phases it carries on with identical iterations instead; the stop would be the second feasible
+    outer iteration (the first ends phase 1)."""
+
+    def __init__(self, *a, **k):
+        super().__init__(*a, **k)
+        self.updates, self.feasible_outer = [], []
 
     def _update_mu(self, c_new, c_old):  # called right after every multiplier update
         self.updates.append(len(self.feas_history))
+        if np.max(np.abs(c_new)) <= self.feas_tol:
+            self.feasible_outer.append(len(self.feas_history))
         return super()._update_mu(c_new, c_old)
+
+
+class RecordingALC(ALC):
+    """ALC that records where its Eqs. 26-27 would stop it; run with feas_tol = 0 so that it never stops."""
+
+    def __init__(self, *a, eps, **k):
+        super().__init__(*a, **k)
+        self.eps, self.stops = eps, []
+
+    def _update_mu(self, q_new, q_old):  # called after every outer iteration, before the weights grow
+        if np.max(np.abs(q_new)) < self.eps and np.max(np.abs(q_new - q_old)) < self.eps:
+            self.stops.append(len(self.feas_history))
+        return super()._update_mu(q_new, q_old)
 
 
 data0 = {"weight": float(C.weight_init), "aero_loads": np.array(C.aero_loads_init), "CD": float(C.CD_init)}
@@ -141,55 +204,59 @@ def objective(x, data):
     return 1e2 * data["CD"]
 
 
-for name in methods:
-    print(f"\n=== {name.upper()} ===")
+for run in args.runs:
+    print(f"\n=== {run} ({N_SWEEPS} sweeps) ===", flush=True)
     nit_history.clear()
     SLSQP_ITERS[0] = 0
     t0 = time.perf_counter()
 
-    if name == "albcd":
-        mu0 = MU
+    if run == "albcd":
+        mu0 = MU_ALBCD
         opt = RecordingALBCD(subproblems=subproblems(), x0=C.x0, mu0=np.full(C.N_CON, mu0), data0=data0,
-                             max_mu=1e6, rho=1.2, tau=0.5, feas_tol=FEAS_TOL, opt_tol=[1e-1, OPT_TOL],
-                             max_outer_iter=80, max_inner_iter=200, verbose=False)
-        opt.solve()
-        updates = opt.updates
-
-    elif name == "alc":
+                             max_mu=1e6, rho=1.2, tau=0.5, feas_tol=FEAS_TOL, opt_tol=[1e-1] + [OPT_TOL] * N_SWEEPS,
+                             max_outer_iter=10 * N_SWEEPS, max_inner_iter=200, verbose=False)
+    elif run == "alc":
         # Eq. 29: one inner loop with a small penalty estimates the coupling constraints, then the
         # penalty term is set to 10% of the initial objective. Its cost is not counted.
-        mu0 = initial_penalty(subproblems(), C.x0, C.N_CON, objective, phi0=phi0, data0=data0,
+        mu0 = initial_penalty(subproblems(budget=False), C.x0, C.N_CON, objective, phi0=phi0, data0=data0,
                               mu_small=1e-3, inner_tol=FEAS_TOL / 100)
         nit_history.clear()
         SLSQP_ITERS[0] = 0
-        opt = ALC(subproblems(), C.x0, np.full(C.N_CON, mu0), objective, phi0=phi0, data0=data0,
-                  feas_tol=FEAS_TOL, max_outer_iter=100, max_inner_iter=200, verbose=False)
-        opt.solve()
-        # outer_history holds the outer iteration of every sweep: an update follows each change
-        updates = list(np.flatnonzero(np.diff(opt.outer_history)) + 1)
-
-    elif name == "admm":
-        mu0 = MU
-        opt = ADMM(subproblems(), C.x0, mu0, n_con=C.N_CON, data0=data0, feas_tol=FEAS_TOL, opt_tol=OPT_TOL,
-                   max_iter=2000, verbose=False)
-        opt.solve()
-        updates = list(range(1, len(opt.feas_history)))  # after every sweep but the last
-
+        opt = RecordingALC(subproblems(), C.x0, np.full(C.N_CON, mu0), objective, phi0=phi0, data0=data0,
+                           eps=FEAS_TOL, feas_tol=0.0, inner_tol=FEAS_TOL / 100, max_outer_iter=10 * N_SWEEPS,
+                           max_inner_iter=200, verbose=False)
+    elif run.startswith("admm"):
+        mu0 = float(run.split("=")[1]) if "=" in run else MU_ADMM[run]
+        opt = ADMM(subproblems(), C.x0, mu0, n_con=C.N_CON, data0=data0, feas_tol=0.0, opt_tol=0.0,
+                   max_iter=N_SWEEPS, verbose=False)
     else:
-        raise SystemExit(f"unknown method {name!r}: use albcd, alc or admm")
+        raise SystemExit(f"unknown run {run!r}: use albcd, alc, admm_small, admm_large or admm=MU")
 
-    r = dict(opt_history=np.array(opt.opt_history), feas_history=np.array(opt.feas_history),
+    try:
+        opt.solve()
+    except BudgetSpent:
+        pass
+
+    feas, res = np.array(opt.feas_history), np.array(opt.opt_history)
+    if run == "albcd":
+        updates = opt.updates
+        stop = opt.feasible_outer[1] if len(opt.feasible_outer) > 1 else 0
+    elif run == "alc":
+        updates = list(np.flatnonzero(np.diff(opt.outer_history)) + 1)
+        stop = opt.stops[0] if opt.stops else 0
+    else:
+        updates = list(range(1, len(feas)))  # after every sweep but the last
+        met = np.flatnonzero((feas <= FEAS_TOL) & (res <= OPT_TOL))
+        stop = int(met[0]) + 1 if met.size else 0
+
+    r = dict(opt_history=res, feas_history=feas,
              error=design_error(opt.x_history[2::2]),  # x after sweep k is x_history[2k]
              updates=np.array(updates, dtype=int), slsqp_iters=np.array(nit_history),
-             success=opt.success, mu0=mu0, max_mu=float(np.max(opt.mu)), x=opt.x,
-             time=time.perf_counter() - t0, sweeps=len(opt.feas_history))
-    print(f"{name}: {r['sweeps']} sweeps, {len(updates)} multiplier updates, {nit_history[-1]} SLSQP iterations, "
-          f"reports {'success' if r['success'] else 'failure'}, optimality residual {r['opt_history'][-1]:.2e}, "
-          f"feasibility {r['feas_history'][-1]:.2e}, relative error {r['error'][-1]:.2e}, mu0 {mu0:.3g}, "
-          f"max mu {r['max_mu']:.3g}, {r['time']:.0f} s")
-
-    # reload before writing, so that runs of other methods in the meantime are kept
-    if os.path.exists(OUT):
-        saved = {**dict(np.load(OUT)), **{k: v for k, v in saved.items() if k.startswith("ref_")}}
-    saved.update({f"{name}_{key}": value for key, value in r.items()})
-    np.savez(OUT, **saved)
+             stop=stop,  # sweep at which the method's own stopping test is met (0: never)
+             mu0=mu0, max_mu=float(np.max(opt.mu)), x=opt.x, time=time.perf_counter() - t0, sweeps=len(feas))
+    at = (f"its stopping test is met at sweep {stop} (optimality residual {res[stop - 1]:.2e}, "
+          f"error {r['error'][stop - 1]:.2e})" if stop else "its stopping test is never met")
+    print(f"{run}: {len(feas)} sweeps, {len(updates)} multiplier updates, {nit_history[-1]} SLSQP iterations, "
+          f"final optimality residual {res[-1]:.2e}, feasibility {feas[-1]:.2e}, relative error "
+          f"{r['error'][-1]:.2e}; {at}; mu0 {mu0:.3g}, max mu {r['max_mu']:.3g}, {r['time']:.0f} s", flush=True)
+    update_results({f"{run}_{key}": value for key, value in r.items()})
