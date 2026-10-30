@@ -1,7 +1,8 @@
 """Problem figure: a 3D view of the optimal wing on the Vashon Ranger R7 airframe, split at
 the root: the left semispan shows the vortex lattice colored by the pressure coefficient
 (the aerodynamics), and the right semispan shows the square-tube wing box colored by its
-von Mises stress at the design load, relative to yield (the structure). Rendered off
+von Mises stress at the design load, relative to yield (the structure). The wing box is
+drawn deflected under the design load (true scale), over an outline of the undeflected box. Rendered off
 screen with PyVista, then labeled with matplotlib. Reads ranger_problem.npz (from
 problem_data.py)."""
 
@@ -20,6 +21,7 @@ d = np.load(os.path.join(HERE, "ranger_problem.npz"))
 
 mesh, cp = d["mesh_opt"], d["cp_opt"]           # (nx, ny, 3) nodes, (nx-1, ny-1) panels
 box_mesh, h = d["box_mesh"], float(d["box_side"])  # wing box nodes and outer side
+w = d["w_opt"]                                   # vertical deflection of the box nodes at the design load
 box_stress = d["sigma_mpa_opt"] / float(d["sigma_yield"])
 cmap_aero, cmap_struct = "Blues", "Oranges"
 cp_norm = Normalize(0.0, float(np.ceil(cp.max() * 10) / 10))
@@ -34,15 +36,22 @@ def lattice(mesh, cells):
     return pv.PolyData(mesh.reshape(-1, 3), np.array(faces).ravel())
 
 
-def square_box(nodes, side, stress):
-    """One square tube segment per element between consecutive spanwise nodes, colored by its stress."""
-    boxes = []
-    for p0, p1, s in zip(nodes[:-1], nodes[1:], stress):
-        x, z = 0.5 * (p0[0] + p1[0]), 0.5 * (p0[2] + p1[2])
-        box = pv.Box(bounds=(x - side / 2, x + side / 2, p0[1], p1[1], z - side / 2, z + side / 2))
-        box.cell_data["sigma"] = np.full(box.n_cells, s)
-        boxes.append(box)
-    return pv.merge(boxes)
+def swept_tube(nodes, side, stress):
+    """A square tube through the spanwise nodes (its section kept level), one segment per element
+    colored by its stress."""
+    corners = np.array([[-1, -1], [1, -1], [1, 1], [-1, 1]]) * side / 2
+    points = np.array([[p[0] + cx, p[1], p[2] + cz] for p in nodes for cx, cz in corners])
+    faces, values = [], []
+    for k, s in enumerate(stress):
+        a, b = 4 * k, 4 * (k + 1)
+        for m in range(4):
+            faces.append([4, a + m, a + (m + 1) % 4, b + (m + 1) % 4, b + m])
+            values.append(s)
+    faces += [[4, 0, 1, 2, 3], [4, *(4 * (len(nodes) - 1) + np.arange(4))]]  # end caps
+    values += [stress[0], stress[-1]]
+    tube = pv.PolyData(points, np.array(faces).ravel())
+    tube.cell_data["sigma"] = np.array(values)
+    return tube
 
 
 panel_y = 0.25 * (mesh[:-1, :-1, 1] + mesh[1:, :-1, 1] + mesh[:-1, 1:, 1] + mesh[1:, 1:, 1])
@@ -51,10 +60,15 @@ aero = lattice(mesh, left)
 aero.cell_data["Cp"] = cp[left]
 skin = lattice(mesh, ~left)
 
-# the right semispan of the wing box, from the centerline to the tip
+# the right semispan of the wing box, from the centerline to the tip, deflected under the design load
+# (true scale), and a ghost of it undeflected, drawn slightly smaller so that near the root, where the
+# two nearly coincide, it stays inside the deflected box instead of flickering through its faces
 right_nodes = box_mesh[:, 1] >= 0
-right_elems = right_nodes[1:]
-box = square_box(box_mesh[right_nodes], h, box_stress[right_elems])
+right_elems = right_nodes[:-1] & right_nodes[1:]   # both end nodes on the right semispan
+nodes = box_mesh[right_nodes]
+box = swept_tube(nodes + np.outer(w[right_nodes], [0.0, 0.0, 1.0]), h, box_stress[right_elems])
+g = 0.97 * h / 2
+undeflected = pv.Box(bounds=(nodes[0, 0] - g, nodes[0, 0] + g, nodes[0, 1], nodes[-1, 1], -g, g))
 
 # The STL is in millimeters, with the span along x, the nose toward +y and z up. As in ranger.py: scale
 # it to meters, cut away its wing panels outboard of the cabin (drawn here from the models instead),
@@ -64,15 +78,21 @@ airframe = pv.read(os.path.join(HERE, "Vashon_Ranger_R7.stl")).scale(1e-3, inpla
 for side in (1, -1):
     airframe = airframe.clip_box(sorted([side * 0.62, side * 4.6]) + [-3.15, -0.8, 0.4, 1.15], invert=True)
 airframe = airframe.rotate_z(90, inplace=False).translate((-1.43, 0.0, -0.68), inplace=False)
+# trim the top of the wing center section over the cabin down to the wing's mid-depth, so the roots
+# of the vortex lattice and the wing box show through it
+airframe = airframe.clip_box([-0.15, 1.55, -0.63, 0.63, 0.0, 1.0], invert=True)
 
 pv.global_theme.font.family = "times"
 plotter = pv.Plotter(off_screen=True, window_size=(2800, 1500))
 plotter.set_background("white")
 plotter.enable_anti_aliasing("ssaa")
+plotter.enable_depth_peeling()  # sort the translucent skin and undeflected box correctly
 plotter.add_mesh(airframe, color="white", smooth_shading=True, specular=0.0, diffuse=0.7, ambient=0.3, show_scalar_bar=False, opacity=1.0)
 plotter.add_mesh(aero, scalars="Cp", cmap=cmap_aero, clim=(cp_norm.vmin, cp_norm.vmax), show_edges=True,
                  edge_color="#6f6f6f", line_width=0.6, show_scalar_bar=False, lighting=False)
 plotter.add_mesh(skin, color="#f2f2f2", opacity=0.55, show_edges=True, edge_color="#9a9a9a", line_width=0.6,
+                 lighting=False)
+plotter.add_mesh(undeflected, color="#9a9a9a", opacity=0.35, show_edges=True, edge_color="#5a5a5a", line_width=1.0,
                  lighting=False)
 plotter.add_mesh(box, scalars="sigma", cmap=cmap_struct, clim=(0, 1), show_scalar_bar=False)
 

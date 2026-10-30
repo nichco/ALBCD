@@ -10,13 +10,19 @@ Compared with cessna_comparison.py (the example's settings):
 
 - the blocks' SLSQP tolerance is 1e-13 instead of 1e-8, so a block solve does not stop before the
   block has moved (at 1e-8 the blocks freeze at small penalties, whatever the method)
-- every method runs exactly N BCD sweeps (one sweep = one solve of each block: aero, then
-  structures). Their stopping tests are switched off, and each run records the sweep at which its
-  own test (feasibility 1e-5, optimality 3e-5 for ALBCD and ADMM; ALC's Eqs. 26-27 with
+- every method runs exactly N BCD sweeps (300 by default; one sweep = one solve of each block:
+  aero, then structures). Their stopping tests are switched off, and each run records the sweep at
+  which its own test (feasibility 1e-5, optimality 3e-5 for ALBCD and ADMM; ALC's Eqs. 26-27 with
   epsilon = 1e-5) would have stopped it. Past that sweep every method keeps running its own
   iteration unchanged: ALBCD more outer iterations of its final phase, ALC more outer iterations
   with its Eq. 25 weight update, ADMM more sweeps with its fixed penalty
-- ALBCD starts from mu0 = 0.1 and ALC from the initial weight of its Eq. 29
+- ALBCD starts from mu0 = 0.1, ALC from the initial weight of its Eq. 29, and ADMM uses a fixed
+  mu = 0.1 (admm_small) or 10 (admm_large)
+
+Past its stopping point ALC's weights grow by beta^2 = 4.84 at every outer iteration (Eq. 25 has no
+feasibility floor, and constraints at round-off cannot shrink by gamma), until the block solves fail
+and the iterates diverge (around sweep 150, with weights near 1e15). Each of those block solves runs
+to SLSQP's 1000-iteration limit, so the ALC run takes hours; the others take minutes.
 - the error is measured against a monolithic solution solved here with SLSQP ftol 1e-14 (the
   example's monolithic_solution.npz is solved with ftol 1e-8 and is about 7e-5 from it)
 
@@ -57,7 +63,7 @@ MU_ADMM = {"admm_small": 0.1, "admm_large": 10.0}  # ADMM's fixed penalties
 
 parser = argparse.ArgumentParser()
 parser.add_argument("runs", nargs="*", default=["albcd", "alc", "admm_small", "admm_large"])
-parser.add_argument("--sweeps", type=int, default=1000, help="BCD sweeps per run")
+parser.add_argument("--sweeps", type=int, default=300, help="BCD sweeps per run")
 parser.add_argument("--out", default=os.path.join(HERE, "cessna_comparison_tight.npz"))
 args = parser.parse_args()
 N_SWEEPS, OUT = args.sweeps, args.out

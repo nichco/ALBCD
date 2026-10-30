@@ -43,7 +43,7 @@ reuses the same compiled code.
 | `monolithic.py` | The same problem solved with a single SLSQP; writes the reference solution `monolithic_solution.npz` |
 | `models.py` | Wing and wing box setup, and the aerodynamic and structural models, shared by all the scripts |
 | `problem_data.py` | Evaluates the initial and monolithic optimal designs; writes `ranger_problem.npz` |
-| `fig_problem_render.py` | The problem figure `fig_problem_render.png`: the optimal wing on the airframe, with the pressure coefficient on the left semispan and the wing box stress on the right |
+| `fig_problem_render.py` | The problem figure `fig_problem_render.png`: the optimal wing on the airframe, with the pressure coefficient on the left semispan and the wing box stress on the right, the wing box drawn deflected at the design load over a ghost of it undeflected |
 | `Vashon_Ranger_R7.stl` | Ranger R7 airframe (in mm), for the PyVista views |
 
 jvlm-oas and jframe are separate packages; install them into the same environment first:

@@ -5,9 +5,12 @@ fig_cessna_comparison_tight.pdf and .png.
 x axis: BCD sweeps, one solve of each block (aero, then structures), so a unit on the axis is the
 same work for every method, and every method runs the same number of sweeps. Open markers sit on the
 sweeps after which ALBCD and ALC update their multipliers (each after an inner loop of one or more
-sweeps), up to where their stopping test is met; ADMM updates after every sweep, so its lines have
-none. A filled marker is where a method's own stopping test is met; the run continues past it.
-Grey lines: the feasibility and optimality tolerances.
+sweeps), up to where their stopping test is met. ADMM updates after every sweep, so its markers are
+only evenly spaced labels. ADMM with mu = 0.1 ends in a 7-sweep limit cycle (feasibility sawtooths
+between about 0.004 and 0.014), drawn as a solid line so the sawtooth stays legible. A filled marker is where a method's own
+stopping test is met; the run continues past it.
+Grey lines: the feasibility and optimality tolerances. The y axes are cut off at the top: ALC's
+iterates diverge after its weights blow up (values up to 1e30), and its lines leave the plot there.
 """
 
 import os
@@ -29,7 +32,7 @@ FEAS_TOL, OPT_TOL = 1e-5, 3e-5  # as in cessna_comparison_tight.py
 mu = lambda run: f"{float(d[run + '_mu0']):.2g}"
 runs = [("albcd", rf"ALBCD ($\mu_0 = {mu('albcd')}$)", "#0072B2", "-", "o", True),
         ("alc", rf"ALC ($\mu_0 = {mu('alc')}$)", "#D55E00", (0, (5, 2)), "s", True),
-        ("admm_small", rf"ADMM ($\mu = {mu('admm_small')}$)", "#009E73", (0, (1, 1.2)), "^", False),
+        ("admm_small", rf"ADMM ($\mu = {mu('admm_small')}$)", "#009E73", "-", "^", False),
         ("admm_large", rf"ADMM ($\mu = {mu('admm_large')}$)", "#CC79A7", (0, (6, 1.5, 1, 1.5)), "v", False)]
 
 fig, (opt, feas, err) = plt.subplots(1, 3, figsize=(7, 2.1), sharex=True)
@@ -37,17 +40,23 @@ for run, label, color, ls, marker, mark_updates in runs:
     sweeps = np.arange(1, int(d[f"{run}_sweeps"]) + 1)
     stop = int(d[f"{run}_stop"])
     updates = d[f"{run}_updates"]
-    every = [u - 1 for u in updates if not stop or u < stop] if mark_updates else []
+    # ALBCD, ALC: the update sweeps; ADMM: 8 log-spaced sweeps, staggered between the two runs (spacing
+    # along the line instead would bunch the markers on the noisy tails)
+    shift = 1.5 if run == "admm_large" else 1.0
+    every = ([u - 1 for u in updates if not stop or u < stop] if mark_updates else
+             list(np.unique(np.round(shift * np.geomspace(1, len(sweeps) / 1.5, 8)).astype(int) - 1)))
     style = dict(color=color, ls=ls, lw=1.2, marker=marker, ms=3, mfc="w", mew=0.8, markevery=every)
     for a, key in ((opt, "opt_history"), (feas, "feas_history"), (err, "error")):
         a.plot(sweeps, d[f"{run}_{key}"], label=label if a is opt else None, **style)
         if stop:  # where the method's own stopping test is met
             a.plot(stop, d[f"{run}_{key}"][stop - 1], marker=marker, color=color, ms=5, ls="none")
 
-for a, label, tol in ((opt, "Optimality residual", OPT_TOL), (feas, "Feasibility", FEAS_TOL),
-                      (err, "Relative error in $x$", None)):
+for a, label, tol, top in ((opt, "Optimality residual", OPT_TOL, 1e2), (feas, "Feasibility", FEAS_TOL, 1e1),
+                           (err, "Relative error in $x$", None, 1e1)):
     a.set_xscale("log")
     a.set_yscale("log")
+    bottom = min(np.nanmin(line.get_ydata()) for line in a.get_lines())
+    a.set_ylim(bottom / 3, top)  # cut off ALC's divergence
     a.xaxis.set_minor_locator(NullLocator())
     a.yaxis.set_minor_locator(NullLocator())
     if tol:
