@@ -62,7 +62,7 @@ for a, label, tol, top in ((opt, "Optimality residual", OPT_TOL, 1e2), (feas, "F
     if tol:
         a.axhline(tol, color="0.6", lw=0.6, zorder=0)
     a.set_ylabel(label)
-    a.set_xlabel("BCD sweep")
+    a.set_xlabel("Cumulative BCD sweeps")
 
 fig.legend(*opt.get_legend_handles_labels(), loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=4,
            handlelength=2.6, frameon=False)

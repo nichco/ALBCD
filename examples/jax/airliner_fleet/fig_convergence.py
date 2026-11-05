@@ -35,7 +35,7 @@ for a, label in ((opt, "Optimality residual"), (feas, "Feasibility"),
     a.xaxis.set_minor_locator(NullLocator())
     a.yaxis.set_minor_locator(NullLocator())
     a.set_ylabel(label)
-    a.set_xlabel("Iteration")
+    a.set_xlabel("Cumulative BCD sweeps")
 
 err.legend(*opt.get_legend_handles_labels(), loc="upper right", handlelength=2.6)
 
