@@ -24,7 +24,7 @@ for k, mu0 in enumerate(d["mu0"]):
     sweeps = np.arange(1, len(d["feas_history"][k]) + 1)
     style = dict(color=colors[k % 6], ls=linestyles[k % 6], marker=markers[k % 6], lw=1.2, ms=3, mfc="w",
                  mew=0.8, markevery=(0.02 * k, 0.1))  # every 10% of the axes diagonal, staggered by line
-    opt.plot(sweeps, d["opt_history"][k], label=rf"$\mu_0 = {mu0:.3g}$", **style)
+    opt.plot(sweeps, d["opt_history"][k], label=rf"$\mu_{{init}} = {mu0:.3g}$", **style)
     feas.plot(sweeps, d["feas_history"][k], **style)
     err.plot(np.arange(len(d["error"][k])) / n, d["error"][k], **style)
 
