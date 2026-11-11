@@ -216,20 +216,35 @@ if __name__ == "__main__":
             outputs["x"] = x_new
             outputs["phi"] = np.array([g0])
 
-        def residual(self, x, y, mu, data) -> float:
+        # def residual(self, x, y, mu, data) -> float:
+
+        #     v = jnp.asarray(self.decompose(x))
+        #     other = jnp.asarray(self.other(x))
+        #     grad_f = jax.grad(self.objective)(v, other, y, mu)
+
+        #     v = np.asarray(v)
+        #     grad_f = np.asarray(grad_f)
+
+        #     # projected-gradient stationarity residual for box-constrained v:
+        #     # zero iff v satisfies the KKT conditions for xl <= v <= xu
+        #     proj = np.clip(v - grad_f, self._xl, self._xu)
+        #     resid = v - proj
+        #     return float(np.max(np.abs(resid)))
+
+        def gradient(self, x, y, mu, data) -> np.ndarray:
 
             v = jnp.asarray(self.decompose(x))
             other = jnp.asarray(self.other(x))
             grad_f = jax.grad(self.objective)(v, other, y, mu)
-
+            
             v = np.asarray(v)
             grad_f = np.asarray(grad_f)
-
+            
             # projected-gradient stationarity residual for box-constrained v:
             # zero iff v satisfies the KKT conditions for xl <= v <= xu
             proj = np.clip(v - grad_f, self._xl, self._xu)
-            resid = v - proj
-            return float(np.max(np.abs(resid)))
+            grad = v - proj
+            return grad
 
 
     class Subproblem2(Subproblem):
@@ -284,6 +299,10 @@ if __name__ == "__main__":
             proj = np.clip(v - grad_f, self._xl, self._xu)
             resid = v - proj
             return float(np.max(np.abs(resid)))
+
+        def gradient(self, x, y, mu, data) -> np.ndarray:
+
+            return
 
 
     v_init = np.array([-0.5, 0.0, 1.0])
