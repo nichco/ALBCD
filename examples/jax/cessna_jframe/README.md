@@ -26,9 +26,9 @@ centerline:
   the spar's thickness control points. The strut stresses and thicknesses join the KS
   constraints, and the strut mass joins the weight.
 
-Bracing the wing cuts the optimal spar mass from 108 kg (the cantilever of `../cessna/`) to
+Bracing the wing cuts the optimal spar mass from 111 kg (the cantilever of `../cessna/`) to
 29 kg, plus 3 kg of struts (1.8 mm walls), so the wing needs less lift and its drag
-coefficient drops from 0.00547 to 0.00472. ALBCD, with the same settings as `../cessna/`,
+coefficient drops from 0.00550 to 0.00472. ALBCD, with the same settings as `../cessna/`,
 converges in 9 outer iterations (51 sweeps) to within 0.13% of the monolithic design.
 
 Each subproblem compiles its objective, local constraints and their derivatives once with
@@ -42,10 +42,15 @@ reuses the same compiled code.
 | `models.py` | Wing, spar and strut setup, and the aerodynamic and structural models, shared by all the scripts |
 | `problem_data.py` | Evaluates the initial and monolithic optimal designs; writes `cessna_problem.npz` |
 | `fig_problem_render.py` | The problem figure `fig_problem_render.png`: the optimal wing on the airframe, with the pressure coefficient on the left semispan and the spar and strut stress on the right |
-| `vlm_jax/` | Vortex-lattice aerodynamics, a JAX port of the aerodynamics in OpenAeroStruct |
 | `cessna182_no_wing.stl` | Cessna 182 fuselage and struts (without wing), for the PyVista views |
 
-jframe is a separate package; install it into the same environment first:
+The aerodynamics use the `jvlm` package (from `jvlm-oas`), a vortex-lattice method in JAX
+ported from OpenAeroStruct, and the structure uses `jframe`. Both are separate packages;
+install them into the same environment first:
+
+```bash
+pip install -e path/to/jvlm-oas
+```
 
 ```bash
 pip install -e path/to/jframe

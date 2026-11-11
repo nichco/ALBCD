@@ -14,11 +14,10 @@ import jax
 jax.config.update("jax_enable_x64", True)  # the models work in float64
 import jax.numpy as jnp
 
-from beam_jax import Beam, CSTube
-from models import (aero_model, structures_model, twist_cp0, thickness_cp0, bspline_twist, bspline_thickness,
-                    y, b, q, v_inf, rho_atm, mesh0_jnp, vlm_geom, vlm_aero, solve_aero, struct_mesh, fixed_nodes,
-                    r, E, G, rho_mat, load_factor, safety_factor, sigma_yield_mpa, min_gauge, chords0, m0)
-from vlm_jax.analysis import panel_pressure
+from models import (aero_model, structures_model, twist_cp0, thickness_cp0,
+                    bspline_twist, bspline_thickness, y, b, q, v_inf, rho_atm, mesh0_jnp, vlm_geom, vlm_aero,
+                    solve_aero, r, load_factor, safety_factor, sigma_yield_mpa, min_gauge, chords0, m0)
+from jvlm.analysis import panel_pressure
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -35,17 +34,10 @@ def evaluate(twist_cp, thickness_cp):
     lift_per_span = strip_forces[:, 2] / out["widths"]   # N/m, 1 g cruise
     cp = panel_pressure(out["mesh"], out["sec_forces"], out["normals"], orient="up") / q
 
-    # the same beam solve as structures_model, kept here to also return the stress and deflection fields
+    # the structure, with its stress and deflection fields
     _, aero_loads, lift = aero_model(twist_cp)
-    num_nodes = len(y)
-    F = jnp.zeros((num_nodes, 6))
-    F = F.at[:, 0].set(aero_loads[:num_nodes] * load_factor * safety_factor)
-    F = F.at[:, 2].set(aero_loads[num_nodes:] * load_factor * safety_factor)
-    beam = Beam(mesh=struct_mesh, E=E, G=G, rho=rho_mat, cs=CSTube(radius=r, thickness=thickness),
-                F=F, fixed_nodes=fixed_nodes)
-    u = beam.solve()
-    sigma_mpa = beam.recover_stress(u) / 1e6
-    max_sigma_ks, min_thickness_ks, weight = structures_model(aero_loads, thickness_cp)
+    max_sigma_ks, min_thickness_ks, weight, beam, u = structures_model(aero_loads, thickness_cp, full_output=True)
+    sigma_mpa = beam.stress(u) / 1e6
 
     return dict(twist_deg=np.degrees(np.array(twist)), thickness_mm=np.array(thickness) * 1e3,
                 lift_per_span=np.array(lift_per_span), sigma_mpa=np.array(sigma_mpa),

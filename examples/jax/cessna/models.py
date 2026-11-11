@@ -1,4 +1,4 @@
-"""Cessna 182-like wing setup and the aerodynamic (VLM) and structural (beam)
+"""Cessna 182-like wing setup and the aerodynamic (VLM) and structural (jframe beam)
 models, shared by cessna.py and monolithic.py so both solve exactly the same problem.
 """
 
@@ -8,12 +8,12 @@ jax.config.update("jax_enable_x64", True)  # modopt and the models work in float
 import jax.numpy as jnp
 from jax.scipy.special import logsumexp
 
-from beam_jax import Beam, CSTube
-from vlm_jax import aerodynamics as vlm_aero
-from vlm_jax import geometry as vlm_geom
-from vlm_jax.analysis import solve_aero
-from vlm_jax.bsplines import get_bspline_mtx
-from vlm_jax.meshing import generate_mesh
+from jframe import Beam, CSTube, Frame
+from jvlm import aerodynamics as vlm_aero
+from jvlm import geometry as vlm_geom
+from jvlm.analysis import solve_aero
+from jvlm.bsplines import get_bspline_mtx
+from jvlm.meshing import generate_mesh
 
 # aero setup
 b = 11.0                      # span (m)
@@ -44,7 +44,7 @@ t_over_c = 0.1   # airfoil thickness-to-chord ratio, sets the spar tube radius
 r = t_over_c * (chords0[:-1] + chords0[1:]) / 4
 # largest admissible wall thickness: the smallest tube radius. A thicker wall than the radius makes the
 # tube model unphysical (its area pi t (2r - t) shrinks as t grows and goes negative past t = 2r), so
-# the thickness control points are bounded above by this (inactive at the optimum, where t/r <= 0.31)
+# the thickness control points are bounded above by this (inactive at the optimum, where t/r <= 0.32)
 thickness_max = float(np.min(np.asarray(r)))
 E = 69e9
 G = 26e9
@@ -84,24 +84,26 @@ def aero_model(twist_cp):
     return out["CD"], aero_loads, lift
 
 
-def structures_model(aero_loads, thickness_cp):
-    """Return the KS max von Mises stress (MPa), the KS min wall thickness (mm) and the total weight."""
-    thickness = bspline_thickness @ thickness_cp
-
+def structures_model(aero_loads, thickness_cp, full_output=False):
+    """Return the KS max von Mises stress (MPa), the KS min wall thickness (mm) and the total weight
+    of the spar, a jframe beam clamped at the center node and loaded by the design-load aero loads.
+    With full_output, also return the beam and its nodal displacements and rotations, (num_nodes, 6)."""
     F = jnp.zeros((num_nodes, 6))
     F = F.at[:, 0].set(aero_loads[:num_nodes] * load_factor * safety_factor)  # drag (chordwise)
     F = F.at[:, 2].set(aero_loads[num_nodes:] * load_factor * safety_factor)  # lift (vertical)
 
-    cs = CSTube(radius=r, thickness=thickness)
-    beam = Beam(mesh=struct_mesh, E=E, G=G, rho=rho_mat, cs=cs, F=F, fixed_nodes=fixed_nodes)
-    u = beam.solve()
+    thickness = bspline_thickness @ thickness_cp
+    beam = Beam(struct_mesh, E, G, rho_mat, CSTube(radius=r, thickness=thickness), F=F, fixed_nodes=fixed_nodes)
+    u = Frame([beam]).solve()[0]
 
     # logsumexp(rho*x)/rho over-estimates max(x), and -logsumexp(-rho*x)/rho
     # under-estimates min(x), so constraining either one is conservative
-    sigma_mpa = beam.recover_stress(u) / 1e6
+    sigma_mpa = beam.stress(u) / 1e6
     max_sigma_mpa = logsumexp(rho_ks * sigma_mpa) / rho_ks
     min_thickness_mm = -logsumexp(-rho_ks_thick * thickness * 1e3) / rho_ks_thick
 
     weight = (beam.mass + m0) * 9.81
 
+    if full_output:
+        return max_sigma_mpa, min_thickness_mm, weight, beam, u
     return max_sigma_mpa, min_thickness_mm, weight

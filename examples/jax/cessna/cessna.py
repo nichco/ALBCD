@@ -32,8 +32,8 @@ warnings.filterwarnings("ignore")
 from models import (aero_model, structures_model, twist_cp0, thickness_cp0, num_cp_twist, num_cp_thickness,
                     num_nodes, bspline_twist, bspline_thickness, min_gauge, sigma_yield_mpa, y, q, v_inf, rho_atm,
                     mesh0_jnp, vlm_geom, solve_aero, thickness_max)
-from vlm_jax import viz as vlm_viz
-from vlm_jax.analysis import panel_pressure
+from jvlm import viz as vlm_viz
+from jvlm.analysis import panel_pressure
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 

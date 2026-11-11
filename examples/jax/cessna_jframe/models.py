@@ -9,11 +9,11 @@ import jax.numpy as jnp
 from jax.scipy.special import logsumexp
 
 from jframe import Beam, CSTube, Frame
-from vlm_jax import aerodynamics as vlm_aero
-from vlm_jax import geometry as vlm_geom
-from vlm_jax.analysis import solve_aero
-from vlm_jax.bsplines import get_bspline_mtx
-from vlm_jax.meshing import generate_mesh
+from jvlm import aerodynamics as vlm_aero
+from jvlm import geometry as vlm_geom
+from jvlm import solve_aero
+from jvlm.bsplines import get_bspline_mtx
+from jvlm.meshing import generate_mesh
 
 # aero setup
 b = 11.0                      # span (m)

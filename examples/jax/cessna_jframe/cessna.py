@@ -33,8 +33,8 @@ from models import (aero_model, structures_model, twist_cp0, thickness_cp0, stru
                     num_cp_thickness, num_struts, num_nodes, num_left_elems, bspline_twist, bspline_thickness,
                     min_gauge, sigma_yield_mpa, y, y_spar_elem, q, v_inf, rho_atm, mesh0_jnp, vlm_geom, solve_aero,
                     thickness_min, thickness_max, strut_thickness_max)
-from vlm_jax import viz as vlm_viz
-from vlm_jax.analysis import panel_pressure
+from jvlm import viz as vlm_viz
+from jvlm import panel_pressure
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
