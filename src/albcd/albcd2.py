@@ -48,8 +48,11 @@ class ALBCD2():
 
 
         # damped-BFGS approximation of the Hessian of f + y^T phi w.r.t. all variables
-        self.B = BFGS(exception_strategy="damp_update", init_scale="auto")
-        self.B.initialize(self.x.size, "hess")
+        # self.B = BFGS(exception_strategy="damp_update", init_scale="auto")
+        # self.B.initialize(self.x.size, "hess")
+
+    def _log(self, msg: str) -> None:
+        if self.verbose: print(msg)
 
     def _update_mu(self, mu, phi_new, phi_old) -> None:
         # increase the penalty parameter of each scalar constraint if
@@ -60,9 +63,9 @@ class ALBCD2():
 
         return np.minimum(mu_new, self.max_mu)
 
-    def _update_y(self, y, phi) -> None:
+    def _update_y(self, y, mu, phi) -> None:
         
-        y_new = np.clip(y + self.mu * phi, -self.max_y, self.max_y)
+        y_new = np.clip(y + mu * phi, -self.max_y, self.max_y)
 
         return y_new
 
@@ -81,17 +84,15 @@ class ALBCD2():
 
                 self.x_history.append(self.x.copy())
 
-            rvec = [np.linalg.norm(subproblem.gradient(self.x, self.y, self.mu, self.data), ord=np.inf)
-                    for subproblem in self.subproblems]
-            opt = max(rvec)
+            opt = max(np.linalg.norm(sp.gradient(self.x, self.y, self.mu, self.data), ord=np.inf)
+                                for sp in self.subproblems)
             self.opt_history.append(opt)
 
             if opt <= opt_tol:
-                print(f'inner loop converged with optimality {opt:.3e} in {i + 1} iterations')
+                self._log(f"inner loop converged with optimality {opt:.3e} in {i + 1} iterations")
                 break
 
-        if i == self.max_inner_iter - 1:
-            print(f'inner loop failed with optimality {opt:.3e} in {i + 1} iterations')
+        else: self._log(f"inner loop failed with optimality {opt:.3e} in {i + 1} iterations")
 
         return opt
 
@@ -112,7 +113,7 @@ class ALBCD2():
                 success = optimality <= opt_tol
                 break
 
-            self.y = self._update_y(self.y, self.phi)
+            self.y = self._update_y(self.y, self.mu, self.phi)
             self.mu = self._update_mu(self.mu, self.phi, phi_old)
             phi_old = self.phi
             
@@ -128,7 +129,7 @@ class ALBCD2():
         success = self._augmented_lagrangian(feas_tol, opt_tol)
 
         self.tf = time.perf_counter() - t0
-        print(f"{'ALBCD converged' if success else 'ALBCD failed'} ({self.tf:.2f} s)")
+        self._log(f"{'ALBCD converged' if success else 'ALBCD failed'} ({self.tf:.2f} s)")
 
         return self
 
