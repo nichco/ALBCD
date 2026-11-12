@@ -15,7 +15,7 @@ class ALBCD2():
                  rho: float = 1.2,
                  tau: float = 0.5,
                  feas_tol: float = 1e-3,
-                 opt_tol: Union[float, Sequence[float]] = (1e-2, 1e-5),
+                 opt_tol: float = 1e-4,
                  max_outer_iter: int = 100,
                  max_inner_iter: int = 10,
                  max_y: float = 1e6,
@@ -33,11 +33,7 @@ class ALBCD2():
         self.rho = rho
         self.tau = tau
         self.feas_tol = feas_tol
-
-        # one optimality tolerance per phase; a scalar gives a single phase
-        self.opt_tol = np.atleast_1d(np.asarray(opt_tol, dtype=float))
-        if self.opt_tol.ndim != 1 or self.opt_tol.size == 0:
-            raise ValueError('opt_tol must be a float or a 1D list/array of floats')
+        self.opt_tol = opt_tol
 
         self.max_outer_iter = max_outer_iter
         self.max_inner_iter = max_inner_iter
@@ -48,7 +44,6 @@ class ALBCD2():
         self.opt_history = []  # optimality (max-norm KKT residual) after each sweep
         self.y = np.zeros_like(self.mu) # Lagrange multipliers, one per coupling constraint
         self.phi = None # coupling constraints at the current x, from the latest subproblem solve
-        self.success = False # set by solve()
 
 
 
@@ -56,93 +51,85 @@ class ALBCD2():
         self.B = BFGS(exception_strategy="damp_update", init_scale="auto")
         self.B.initialize(self.x.size, "hess")
 
-    def _update_mu(self, c_new, c_old) -> None:
+    def _update_mu(self, mu, phi_new, phi_old) -> None:
         # increase the penalty parameter of each scalar constraint if
         # it is infeasible and its feasibility is not decreasing fast enough.
+        
+        grow = np.abs(phi_new) > np.maximum(self.tau * np.abs(phi_old), self.feas_tol)
+        mu_new = np.where(grow, self.rho * mu, mu)
 
-        f_new = np.abs(c_new)
-        f_old = np.abs(c_old)
-        grow = (f_new > self.tau * f_old) & (f_new > self.feas_tol)
-        self.mu[grow] = np.minimum(self.rho * self.mu[grow], self.max_mu)
+        return np.minimum(mu_new, self.max_mu)
 
-        return None
+    def _update_y(self, y, phi) -> None:
+        
+        y_new = np.clip(y + self.mu * phi, -self.max_y, self.max_y)
 
-    def _gradient(self, x, y, mu):
-        # gradient of the augmented Lagrangian (no proximal term) w.r.t. all variables
-        g = np.zeros_like(x)
-        for sub in self.subproblems:
-            g[sub.index] = sub.gradient(x, y, mu, self.data)
+        return y_new
 
-        return g
+    def _block_coordinate_descent(self, opt_tol):
+
+        for i in range(self.max_inner_iter):
+
+            for subproblem in self.subproblems:
+
+                outputs = {}
+                subproblem.solve(self.x, self.y, self.mu, self.data, outputs)
+                self.x = outputs.pop("x")
+                # phi at the new x; none when unconstrained. A missing or wrong-sized phi fails the reshape
+                self.phi = np.array(outputs.pop("phi", []), dtype=float).reshape(self.mu.shape)
+                self.data.update(outputs)  # any other output is shared through data
+
+                self.x_history.append(self.x.copy())
+
+            rvec = [np.linalg.norm(subproblem.gradient(self.x, self.y, self.mu, self.data), ord=np.inf)
+                    for subproblem in self.subproblems]
+            opt = max(rvec)
+            self.opt_history.append(opt)
+
+            if opt <= opt_tol:
+                print(f'inner loop converged with optimality {opt:.3e} in {i + 1} iterations')
+                break
+
+        if i == self.max_inner_iter - 1:
+            print(f'inner loop failed with optimality {opt:.3e} in {i + 1} iterations')
+
+        return opt
+
+    def _augmented_lagrangian(self, feas_tol, opt_tol):
+
+        phi_old = np.full_like(self.mu, np.inf)
+        success = False
+        
+        k = 0
+        while k < self.max_outer_iter:
+            k += 1
+
+            optimality = self._block_coordinate_descent(opt_tol)
+
+            feas = np.max(np.abs(self.phi))
+
+            if feas <= feas_tol:
+                success = optimality <= opt_tol
+                break
+
+            self.y = self._update_y(self.y, self.phi)
+            self.mu = self._update_mu(self.mu, self.phi, phi_old)
+            phi_old = self.phi
+            
+        return success
 
 
     def solve(self) -> "ALBCD2":
 
         t0 = time.perf_counter()
-        log = print if self.verbose else lambda *args: None
-        self.success = False
-        phi_old = np.full_like(self.mu, np.inf)  # no penalty parameter grows on the first outer iteration
-        k = 0
+        feas_tol = self.feas_tol
+        opt_tol = self.opt_tol
 
-        for phase, opt_tol in enumerate(self.opt_tol, start=1):  # tolerance phases
-
-            # augmented Lagrangian outer loop
-            while k < self.max_outer_iter:
-                k += 1
-
-                # BCD inner loop
-                for j in range(1, self.max_inner_iter + 1):
-
-                    for sub in self.subproblems:
-
-                        x_old = self.x.copy()
-
-                        outputs = {}
-                        sub.solve(self.x, self.y, self.mu, self.data, outputs)
-                        self.x = outputs.pop("x")
-                        # phi at the new x; none when unconstrained. A missing or wrong-sized phi fails the reshape
-                        self.phi = np.array(outputs.pop("phi", []), dtype=float).reshape(self.mu.shape)
-                        self.data.update(outputs)  # any other output is shared through data
-
-                        self.x_history.append(self.x.copy())
-
-
-                        s = self.x - x_old
-                        if np.linalg.norm(s) > 1e-10:
-                            self.B.update(s, self._gradient(self.x, self.y, self.mu) - self._gradient(x_old, self.y, self.mu))
-
-                    self.feas_history.append(float(np.max(np.abs(self.phi), initial=0.0)))
-
-                    res = max(sub.residual(self.x, self.y, self.mu, self.data) for sub in self.subproblems)
-                    self.opt_history.append(res)
-
-                    log(f'outer {k:3d} | sweep {j:3d} | opt_res {res:.3e}')
-
-                    if res <= opt_tol: break
-
-
-                feas = np.max(np.abs(self.phi), initial=0.0)  # 0 when unconstrained
-
-                log(f'outer {k:3d} | feas {feas:.3e} | max mu {np.max(self.mu, initial=0.0):.3e} | |y| {np.linalg.norm(self.y):.3e}')
-
-                # if feasible in the final phase: stop
-                # success also requires the last inner loop to have reached opt_tol
-                if feas <= self.feas_tol and phase == len(self.opt_tol):
-                    self.success = res <= opt_tol
-                    break
-
-                # update the multipliers and clip to the bounds
-                self.y = np.clip(self.y + self.mu * self.phi, -self.max_y, self.max_y)
-                self._update_mu(self.phi, phi_old)
-                phi_old = self.phi
-
-                if feas <= self.feas_tol:
-                    log(f'Phase {phase} complete, starting phase {phase + 1}')
-                    break  # next phase
+        success = self._augmented_lagrangian(feas_tol, opt_tol)
 
         self.tf = time.perf_counter() - t0
-        iters = f'{k} outer iterations'
-        log(f"{'Converged' if self.success else 'Did not converge'} after {iters} ({self.tf:.2f} s)")
+        print(f"{'ALBCD converged' if success else 'ALBCD failed'} ({self.tf:.2f} s)")
+
         return self
 
 
@@ -216,21 +203,6 @@ if __name__ == "__main__":
             outputs["x"] = x_new
             outputs["phi"] = np.array([g0])
 
-        # def residual(self, x, y, mu, data) -> float:
-
-        #     v = jnp.asarray(self.decompose(x))
-        #     other = jnp.asarray(self.other(x))
-        #     grad_f = jax.grad(self.objective)(v, other, y, mu)
-
-        #     v = np.asarray(v)
-        #     grad_f = np.asarray(grad_f)
-
-        #     # projected-gradient stationarity residual for box-constrained v:
-        #     # zero iff v satisfies the KKT conditions for xl <= v <= xu
-        #     proj = np.clip(v - grad_f, self._xl, self._xu)
-        #     resid = v - proj
-        #     return float(np.max(np.abs(resid)))
-
         def gradient(self, x, y, mu, data) -> np.ndarray:
 
             v = jnp.asarray(self.decompose(x))
@@ -285,28 +257,23 @@ if __name__ == "__main__":
             outputs["x"] = x_new
             outputs["phi"] = np.array([g0])
 
-        def residual(self, x, y, mu, data) -> float:
+        def gradient(self, x, y, mu, data) -> np.ndarray:
 
             v = jnp.asarray(self.decompose(x))
             other = jnp.asarray(self.other(x))
             grad_f = jax.grad(self.objective)(v, other, y, mu)
-
+            
             v = np.asarray(v)
             grad_f = np.asarray(grad_f)
-
+            
             # projected-gradient stationarity residual for box-constrained v:
             # zero iff v satisfies the KKT conditions for xl <= v <= xu
             proj = np.clip(v - grad_f, self._xl, self._xu)
-            resid = v - proj
-            return float(np.max(np.abs(resid)))
-
-        def gradient(self, x, y, mu, data) -> np.ndarray:
-
-            return
+            grad = v - proj
+            return grad
 
 
     v_init = np.array([-0.5, 0.0, 1.0])
-    # v_init = np.array([-0.5, 0.2, 1.0])
 
     opt = ALBCD2(subproblems=[Subproblem1(index=slice(0, 2)), # owns x1 and s
                             Subproblem2(index=slice(2, 3))], # owns x2
@@ -316,7 +283,7 @@ if __name__ == "__main__":
                 rho=1.2,
                 tau=0.5,
                 feas_tol=1e-3,
-                opt_tol=[1e-2, 1e-4],
+                opt_tol=1e-4,
                 max_y=1e6,
                 max_outer_iter=100,
                 max_inner_iter=100)
