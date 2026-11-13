@@ -2,6 +2,8 @@ import time
 from typing import Optional, Sequence, Union
 import numpy as np
 from scipy.optimize import BFGS
+from types import SimpleNamespace
+from collections import defaultdict
 
 class ALBCD2():
 
@@ -27,7 +29,6 @@ class ALBCD2():
         self.data = {} if data0 is None else dict(data0) # other quantities shared between subproblems; never holds x, y, mu or phi
         self.tf = None
 
-        # force float dtype; an integer-dtype mu would otherwise truncate penalty growth.
         self.mu = np.asarray(mu0, dtype=float) # penalty parameter(s)
         self.max_mu = max_mu
         self.rho = rho
@@ -44,6 +45,14 @@ class ALBCD2():
         self.opt_history = []  # optimality (max-norm KKT residual) after each sweep
         self.y = np.zeros_like(self.mu) # Lagrange multipliers, one per coupling constraint
         self.phi = None # coupling constraints at the current x, from the latest subproblem solve
+
+
+        self.history = defaultdict(list)
+        # self._record(x=self.x)
+
+        # def _record(self, **values) -> None:
+        #     for name, value in values.items():
+        #         self.history[name].append(np.copy(value))  # copy, so later in-place updates don't alias
 
 
 
@@ -64,8 +73,9 @@ class ALBCD2():
         return np.minimum(mu_new, self.max_mu)
 
     def _update_y(self, y, mu, phi) -> None:
-        
-        y_new = np.clip(y + mu * phi, -self.max_y, self.max_y)
+
+        y_new = y + mu * phi
+        y_new = np.clip(y_new, -self.max_y, self.max_y)
 
         return y_new
 
@@ -83,6 +93,8 @@ class ALBCD2():
                 self.data.update(outputs)  # any other output is shared through data
 
                 self.x_history.append(self.x.copy())
+                self.history["x"].append(self.x.copy())
+                self.history["phi"].append(self.phi.copy())
 
             opt = max(np.linalg.norm(sp.gradient(self.x, self.y, self.mu, self.data), ord=np.inf)
                                 for sp in self.subproblems)
@@ -96,37 +108,30 @@ class ALBCD2():
 
         return opt
 
-    def _augmented_lagrangian(self, feas_tol, opt_tol):
-
-        phi_old = np.full_like(self.mu, np.inf)
-        success = False
-        
-        k = 0
-        while k < self.max_outer_iter:
-            k += 1
-
-            optimality = self._block_coordinate_descent(opt_tol)
-
-            feas = np.max(np.abs(self.phi))
-
-            if feas <= feas_tol:
-                success = optimality <= opt_tol
-                break
-
-            self.y = self._update_y(self.y, self.mu, self.phi)
-            self.mu = self._update_mu(self.mu, self.phi, phi_old)
-            phi_old = self.phi
-            
-        return success
-
-
     def solve(self) -> "ALBCD2":
 
         t0 = time.perf_counter()
         feas_tol = self.feas_tol
         opt_tol = self.opt_tol
 
-        success = self._augmented_lagrangian(feas_tol, opt_tol)
+        phi_old = np.full_like(self.mu, np.inf)
+        success = False
+                
+        k = 0
+        while k < self.max_outer_iter:
+            k += 1
+        
+            optimality = self._block_coordinate_descent(opt_tol)
+        
+            feas = np.max(np.abs(self.phi))
+        
+            if feas <= feas_tol:
+                success = optimality <= opt_tol
+                break
+        
+            self.y = self._update_y(self.y, self.mu, self.phi)
+            self.mu = self._update_mu(self.mu, self.phi, phi_old)
+            phi_old = self.phi
 
         self.tf = time.perf_counter() - t0
         self._log(f"{'ALBCD converged' if success else 'ALBCD failed'} ({self.tf:.2f} s)")
