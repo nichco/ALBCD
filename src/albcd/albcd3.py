@@ -20,9 +20,10 @@ class ALBCD3():
     taken from (x, v):
 
         [ B   N^T ] [ d     ]     [ g   ]
-        [ N   0   ] [ delta ] = - [ phi ],        y <- v + delta,    x <- x + d  (optional)
+        [ N   0   ] [ delta ] = - [ phi ],        y <- v + delta
 
-    restricted to the directions d that keep the blocks' active local constraints fixed. Here
+    restricted to the directions d that keep the blocks' active local constraints fixed. Only
+    the multiplier part delta is used; x changes only through the blocks' own solves. Here
     N = dphi/dx, B is the Hessian of L and g = grad_x L_mu(x, y) = grad_x L(x, v) is whatever
     gradient the sweeps left behind. With g = 0 the multiplier part is Bertsekas' second-order
     update y + D^-1 phi, D = N (B + N^T mu N)^-1 N^T; with g != 0 it is his update for inexact
@@ -42,11 +43,10 @@ class ALBCD3():
     The system is solved in the least-squares sense, which gives the minimum-norm step when
     it is singular (no curvature information yet in some direction, or dependent constraints).
 
-    Safeguards. (1) A Newton step should remove the constraint violation; if the sweeps that
+    Safeguards. A Newton step should remove the constraint violation; if the sweeps that
     follow at least double it instead, the step is undone (x, y and data return to where it
     was taken, with the first-order multipliers) and the next attempts are postponed. After a
-    smaller increase the next update is first order. (2) x + d is used only if phi there,
-    which the linear model predicts to be zero, is at most 10% of the current violation.
+    smaller increase the next update is first order.
 
     On top of solve(), each subproblem provides
 
@@ -65,15 +65,10 @@ class ALBCD3():
             The block variables at every iterate of the latest solve() and what gradient()
             would have returned there. Without it the block contributes one secant pair per
             solve (its start and end points), at the cost of two calls of gradient().
-        evaluate(x, data, outputs) -> None                                       [optional]
-            Like solve() without the minimization: set outputs["phi"] and whatever the block
-            shares through data, at the given x. The x part of the Newton step is taken only
-            if every block has it.
 
     Parameters are those of ALBCD2, plus
 
         multiplier_update   'second_order' or 'first_order'
-        primal_step         also take the x part of the Newton step (needs evaluate())
         cross_terms         estimate the off-diagonal blocks of B too (two more calls of every
                             block's gradient() per block solve)
 
@@ -88,7 +83,6 @@ class ALBCD3():
                  data0: Optional[dict] = None,
                  multiplier_update: str = 'second_order',
                  cross_terms: bool = False,
-                 primal_step: bool = True,
                  max_mu: float = 1e3,
                  rho: float = 1.2,
                  tau: float = 0.5,
@@ -108,7 +102,6 @@ class ALBCD3():
         self.data = {} if data0 is None else dict(data0) # other quantities shared between subproblems
         self.multiplier_update = multiplier_update
         self.cross_terms = cross_terms
-        self.primal_step = primal_step
 
         self.mu = np.array(mu0, dtype=float) # penalty parameters (copy, float)
         self.max_mu = max_mu
@@ -237,20 +230,19 @@ class ALBCD3():
 
     @staticmethod
     def _newton_step(B, N, Z, g, phi):
-        # solve [B N^T; N 0] [d; delta] = -[g; phi] over d in span(Z); returns (delta, d).
+        # solve [B N^T; N 0] [d; delta] = -[g; phi] over d in span(Z); returns delta.
         # Least squares rather than LU: the minimum-norm solution of a singular system is a
         # usable step, the LU solution of a nearly singular one is not.
         NZ = N @ Z
         n, m = Z.shape[1], N.shape[0]
         K = np.block([[Z.T @ B @ Z, NZ.T], [NZ, np.zeros((m, m))]])
         solution = np.linalg.lstsq(K, -np.concatenate([Z.T @ g, phi]), rcond=None)[0]
-        return solution[n:], Z @ solution[:n]
+        return solution[n:]
 
-    def _update_y(self, y, mu, phi):
-        # returns the new multipliers and, after a second-order update, the x part of the Newton step
+    def _update_y(self, y, mu, phi) -> np.ndarray:
 
         v = y + mu * phi   # first-order update
-        update, d = 'first_order', None
+        update = 'first_order'
 
         if self.multiplier_update == 'second_order':
             N = self._coupling_jacobian(self.x, self.data)
@@ -260,32 +252,15 @@ class ALBCD3():
             elif self._second_order_ok:
                 Z = self._active_null_space(self.x, y, mu, self.data)
                 g = self._gradient(self.x, y, mu, self.data)   # what the sweeps left behind
-                delta, step = self._newton_step(self.B, N, Z, g, phi)
+                delta = self._newton_step(self.B, N, Z, g, phi)
                 if np.all(np.isfinite(delta)):
                     self._undo = dict(x=self.x.copy(), data=dict(self.data), phi=phi.copy(),
                                       y=np.clip(v, -self.max_y, self.max_y))
                     v = v + delta
-                    update, d = 'second_order', step
+                    update = 'second_order'
 
         self.update_history.append(update)
-        return np.clip(v, -self.max_y, self.max_y), d
-
-    def _take_primal_step(self, d) -> None:
-        # x <- x + d if the linearization behind d holds there. Needs every block's evaluate(),
-        # which recomputes the block's outputs (phi and whatever it shares through data) at a given x.
-        if d is None or not all(hasattr(sp, "evaluate") for sp in self.subproblems):
-            return
-        x, data = self.x + d, dict(self.data)
-        for sp in self.subproblems:
-            outputs = {}
-            sp.evaluate(x, data, outputs)
-            phi = np.array(outputs.pop("phi"), dtype=float).reshape(self.mu.shape)
-            data.update(outputs)
-        # the Newton step predicts phi = 0 at x + d; accept it if at least 90% of that reduction is real
-        if np.all(np.isfinite(phi)) and np.max(np.abs(phi)) <= 0.1 * np.max(np.abs(self.phi)):
-            self.x, self.data = x, data
-            self.x_history.append(self.x.copy())
-            self.update_history[-1] = 'newton'
+        return np.clip(v, -self.max_y, self.max_y)
 
     # ---------------------------------------------------------------- main loops
 
@@ -361,11 +336,9 @@ class ALBCD3():
             self._second_order_ok = np.max(np.abs(self.phi)) <= max(np.max(np.abs(phi_old)), self.feas_tol) \
                 if np.all(np.isfinite(phi_old)) else True
 
-            self.y, d = self._update_y(self.y, self.mu, self.phi)
+            self.y = self._update_y(self.y, self.mu, self.phi)
             self.mu = self._update_mu(self.mu, self.phi, phi_old)
             phi_old = self.phi
-            if self.primal_step:
-                self._take_primal_step(d)
 
         self.outer_iterations = k
         self.tf = time.perf_counter() - t0

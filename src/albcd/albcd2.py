@@ -21,6 +21,7 @@ class ALBCD2():
                  max_outer_iter: int = 100,
                  max_inner_iter: int = 10,
                  max_y: float = 1e6,
+                 kappa: float = 10.0,
                  verbose: bool = True,
                  ):
 
@@ -39,23 +40,13 @@ class ALBCD2():
         self.max_outer_iter = max_outer_iter
         self.max_inner_iter = max_inner_iter
         self.max_y = max_y
+        self.kappa = kappa
         self.verbose = verbose
-        self.x_history = [self.x.copy()]
-        self.feas_history = [] # feasibility (max constraint violation) after each sweep
-        self.opt_history = []  # optimality (max-norm KKT residual) after each sweep
         self.y = np.zeros_like(self.mu) # Lagrange multipliers, one per coupling constraint
         self.phi = None # coupling constraints at the current x, from the latest subproblem solve
-
-
         self.history = defaultdict(list)
-        # self._record(x=self.x)
-
-        # def _record(self, **values) -> None:
-        #     for name, value in values.items():
-        #         self.history[name].append(np.copy(value))  # copy, so later in-place updates don't alias
-
-
-
+        self.history["x"].append(self.x.copy())
+        
         # damped-BFGS approximation of the Hessian of f + y^T phi w.r.t. all variables
         # self.B = BFGS(exception_strategy="damp_update", init_scale="auto")
         # self.B.initialize(self.x.size, "hess")
@@ -92,21 +83,31 @@ class ALBCD2():
                 self.phi = np.array(outputs.pop("phi", []), dtype=float).reshape(self.mu.shape)
                 self.data.update(outputs)  # any other output is shared through data
 
-                self.x_history.append(self.x.copy())
                 self.history["x"].append(self.x.copy())
-                self.history["phi"].append(self.phi.copy())
 
-            opt = max(np.linalg.norm(sp.gradient(self.x, self.y, self.mu, self.data), ord=np.inf)
+            optimality = max(np.linalg.norm(sp.gradient(self.x, self.y, self.mu, self.data), ord=np.inf)
                                 for sp in self.subproblems)
-            self.opt_history.append(opt)
+            self.history["optimality"].append(optimality)
 
-            if opt <= opt_tol:
-                self._log(f"inner loop converged with optimality {opt:.3e} in {i + 1} iterations")
+            feas = np.max(np.abs(self.phi), initial=0.0)
+            self.history["feasibility"].append(feas)
+
+            # inexact inner loop: the tolerance is loose while feasibility is large
+            # and tightens to opt_tol as feasibility approaches feas_tol
+            tol = opt_tol * max(1.0, self.kappa * feas / self.feas_tol)
+
+            if optimality <= tol:
+                self._log(f"inner loop converged with optimality {optimality:.3e} (tolerance {tol:.3e}) in {i + 1} iterations")
                 break
 
-        else: self._log(f"inner loop failed with optimality {opt:.3e} in {i + 1} iterations")
+            # exact albcd
+            # if opt <= opt_tol:
+            #     self._log(f"inner loop converged with optimality {opt:.3e} in {i + 1} iterations")
+            #     break
 
-        return opt
+        else: self._log(f"inner loop failed with optimality {optimality:.3e} in {i + 1} iterations")
+
+        return optimality
 
     def solve(self) -> "ALBCD2":
 
@@ -125,10 +126,17 @@ class ALBCD2():
         
             feas = np.max(np.abs(self.phi))
         
-            if feas <= feas_tol:
-                success = optimality <= opt_tol
+            # the inner tolerance can be looser than opt_tol, so stop only once the iterate is
+            # both feasible and optimal to the final tolerance; otherwise keep iterating
+            if feas <= feas_tol and optimality <= opt_tol:
+                success = True
                 break
-        
+
+            # previous behavior: stop as soon as the iterate is feasible
+            # if feas <= feas_tol:
+            #     success = optimality <= opt_tol
+            #     break
+
             self.y = self._update_y(self.y, self.mu, self.phi)
             self.mu = self._update_mu(self.mu, self.phi, phi_old)
             phi_old = self.phi
@@ -297,10 +305,10 @@ if __name__ == "__main__":
     opt.solve()
 
 
-    history = np.array(opt.x_history)
-    x1_history = history[:, 0]
-    s_history = history[:, 1]
-    x2_history = history[:, 2]
+    x_history = np.array(opt.history["x"])
+    x1_history = x_history[:, 0]
+    s_history = x_history[:, 1]
+    x2_history = x_history[:, 2]
 
 
     plt.rcParams.update({'font.size': 14})
