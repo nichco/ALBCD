@@ -1,21 +1,11 @@
 # Distribution Statement A. Approved for public release: distribution is unlimited. Approved AFRL-2026-1671 28-09-2026.
 
-"""Augmented Lagrangian coordination (ALC) of Tosserams, Etman and Rooda (2008), for comparison
+"""
+Augmented Lagrangian coordination (ALC) of Tosserams, Etman and Rooda (2008), for comparison
 with ALBCD.
 
 S. Tosserams, L. F. P. Etman and J. E. Rooda, "Augmented Lagrangian coordination for
 distributed optimal design in MDO," Int. J. Numer. Meth. Engng 73 (2008) 1885-1910.
-
-ALC relaxes the coupling constraints with the penalty v^T q + ||w o q||^2. With y = v and
-mu_i = 2 w_i^2 this is exactly ALBCD's y^T phi + 1/2 sum mu_i phi_i^2, and ALC's multiplier
-update v <- v + 2 w o w o q is ALBCD's y <- y + mu o phi. The subproblems are therefore the
-same :class:`~albcd.Subproblem` objects, and only the coordination differs:
-
-- the inner loop stops when the relative change of the merit function between two sweeps,
-  |F^k - F^{k-1}| / (1 + |F^k|), is below ``inner_tol`` (Eq. 28), not on a KKT residual;
-- each weight grows as w_i <- beta w_i, i.e. mu_i <- beta^2 mu_i, whenever
-  |q_i| > gamma |q_i^prev| (Eq. 25), with no feasibility threshold and no cap;
-- the outer loop stops when max|q| < eps and max|q - q_prev| < eps (Eqs. 26-27).
 """
 
 import time
@@ -24,12 +14,7 @@ import numpy as np
 
 
 class ALC():
-    """Augmented Lagrangian coordination (Tosserams et al., 2008).
-
-    Uses the same subproblems as :class:`~albcd.ALBCD`. Penalties are passed and stored in
-    ALBCD's convention, ``mu = 2 w^2``; ``beta`` and ``gamma`` are ALC's weight-growth constants,
-    so ``mu`` grows by ``beta**2``.
-
+    """
     Parameters
     ----------
     subproblems : list of Subproblem

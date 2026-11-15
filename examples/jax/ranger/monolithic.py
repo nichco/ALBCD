@@ -1,24 +1,21 @@
-"""Monolithic reference solution of the Vashon Ranger R7 wing problem in ranger.py.
-
-The same problem, solved with a single SLSQP over the twist and wall thickness
-control points, without the coupling copies (aero_loads_copy -> aero_loads,
-weight_copy -> weight). Its optimum is saved to monolithic_solution.npz, which
-ranger.py measures the ALBCD solution's error against.
-"""
-
 import os
 import numpy as np
 import jax
-jax.config.update("jax_enable_x64", True)  # modopt and the models work in float64
+jax.config.update("jax_enable_x64", True)
 import jax.numpy as jnp
 import modopt as mo
 import matplotlib.pyplot as plt
+import pyvista as pv
+from jeometry.plotting import set_view
+from jvlm import panel_pressure
+from jvlm.viz import to_pyvista_mesh
 import warnings
 warnings.filterwarnings("ignore")
 
 from models import (aero_model, structures_model, build_frame, twist_cp0, thickness_cp0, num_cp_twist,
                     num_cp_thickness, bspline_twist, bspline_thickness, min_gauge, sigma_yield_mpa, y, y_elem,
-                    b, v_inf, rho_atm, mesh0_jnp, vlm_geom, vlm_aero, solve_aero, thickness_max)
+                    b, v_inf, rho_atm, q, vlm_mesh, vlm_aero, solve_aero, thickness_max)
+from ranger_geometry_parameterization import twist_ffd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -44,7 +41,7 @@ cl = np.array([-np.inf, 0.0])  # stress <= yield, lift = weight
 cu = np.array([0.0, 0.0])
 c_scaler = np.array([1e-2, 1e-2])
 x_scaler = np.concatenate([10 * np.ones(num_cp_twist), 100 * np.ones(num_cp_thickness)])
-# the same thickness bounds as the structures block in ranger.py: min gauge <= thickness <= h_box / 2
+# the same thickness bounds as the structures block in ranger.py: min gauge <= thickness <= d_tube / 2
 xl = np.concatenate([np.full(num_cp_twist, -np.inf), np.full(num_cp_thickness, min_gauge)])
 xu = np.concatenate([np.full(num_cp_twist, np.inf), np.full(num_cp_thickness, thickness_max)])
 
@@ -72,8 +69,7 @@ np.savez(os.path.join(HERE, 'monolithic_solution.npz'),
 twist = bspline_twist @ twist_cp_star
 thickness = bspline_thickness @ thickness_cp_star
 
-def_mesh = vlm_geom.apply_twist_rotation(
-    mesh0_jnp, jnp.rad2deg(twist), ref_axis_pos=0.25, symmetry=False, rotate_x=True)
+def_mesh = vlm_mesh(twist_cp_star)
 out = solve_aero(def_mesh, v_inf, rho_atm, symmetry=False, with_viscous=False)
 print('CD: ', float(out["CD"]))
 print('CL: ', float(out["CL"]))
@@ -130,3 +126,13 @@ ax_lift.set_facecolor(facecolor)
 
 plt.tight_layout(h_pad=0.2)
 plt.show()
+
+
+# the optimal (twisted) wing and its VLM mesh, colored by the pressure coefficient
+cp = panel_pressure(out["mesh"], out["sec_forces"], out["normals"], orient="up") / q
+plotter = pv.Plotter()
+twist_ffd.twisted_wing(twist_cp_star).plot(color='silver', opacity=0.3, title='', plotter=plotter)
+plotter.add_mesh(to_pyvista_mesh(out["mesh"], {"Cp": cp}), scalars="Cp", cmap="coolwarm", show_edges=True,
+                 show_scalar_bar=False)
+set_view(plotter)
+plotter.show()
