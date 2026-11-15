@@ -16,11 +16,11 @@ for rho in rhos:
     print(f"\n=== rho = {rho:.3f} ===")
     opt = make_albcd(rho)
     opt.solve()
-    opt_history.append(np.array(opt.opt_history))
-    feas_history.append(np.array(opt.feas_history))
-    error.append(design_error(opt.x_history))
-    print(f"rho = {rho:.3f}: {len(opt.feas_history)} sweeps, success {opt.success}, "
-          f"relative error {error[-1][-1]:.2e}")
+    opt_history.append(np.array(opt.history["optimality"]))
+    feas_history.append(np.array(opt.history["feasibility"]))
+    error.append(design_error(opt.history["x"]))
+    print(f"rho = {rho:.3f}: {len(opt.history["feasibility"])} sweeps, success {opt.success}, "
+          f"||x - x*|| {error[-1][-1]:.2e}")
 
 
 def ragged(arrays):

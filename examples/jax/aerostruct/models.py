@@ -1,4 +1,4 @@
-"""Wing setup and the aerodynamic (VLM) and structural (beam) models, shared by
+"""Wing setup and the aerodynamic (jvlm VLM) and structural (jframe beam) models, shared by
 aerostruct.py and monolithic.py so both solve exactly the same problem.
 """
 
@@ -7,12 +7,11 @@ import jax
 jax.config.update("jax_enable_x64", True)  # modopt and the models work in float64
 import jax.numpy as jnp
 
-from beam_jax import Beam, CSTube
-from vlm_jax import aerodynamics as vlm_aero
-from vlm_jax import geometry as vlm_geom
-from vlm_jax.analysis import solve_aero
-from vlm_jax.bsplines import get_bspline_mtx
-from vlm_jax.meshing import generate_mesh
+from jframe import Beam, CSTube, Frame
+from jvlm import aerodynamics as vlm_aero
+from jvlm import geometry as vlm_geom
+from jvlm import generate_mesh, solve_aero
+from jvlm.bsplines import get_bspline_mtx
 
 # aero setup
 b = 10.0                      # span (m)
@@ -84,7 +83,8 @@ def structures_model(aero_loads, thickness_cp):
 
     cs = CSTube(radius=r, thickness=thickness)
     beam = Beam(mesh=struct_mesh, E=E, G=G, rho=rho_mat, cs=cs, F=F, fixed_nodes=fixed_nodes)
-    u = jnp.linalg.norm(beam.solve()[:, :3], axis=1)
-    weight = (beam.mass + m0) * 9.81
+    frame = Frame([beam])
+    u = jnp.linalg.norm(frame.solve()[0][:, :3], axis=1)
+    weight = (frame.mass + m0) * 9.81
 
     return u[-1], u[0], weight

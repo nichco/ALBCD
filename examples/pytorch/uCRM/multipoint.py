@@ -117,7 +117,7 @@ opt = ALBCD(subproblems=[MissionSubproblem(i) for i in range(N)],
             rho=1.2,
             tau=0.5,
             feas_tol=1e-4,
-            opt_tol=[1e-3, 5e-4],
+            opt_tol=5e-4,
             max_y=1e6,
             max_outer_iter=100,
             max_inner_iter=7)
@@ -168,7 +168,7 @@ ax[0].set_xlabel("Subproblem solve")
 ax[0].set_ylabel("Fuel burn error")
 ax[0].grid(color="lavender", alpha=0.5, axis="y")
 
-ax[1].semilogy(opt.feas_history, linewidth=2, color="tab:orange")
+ax[1].semilogy(opt.history["feasibility"], linewidth=2, color="tab:orange")
 ax[1].axhline(opt.feas_tol, color="gray", linewidth=1, linestyle="--", alpha=0.8)
 ax[1].set_xlabel("Sweep")
 ax[1].set_ylabel("Feasibility")

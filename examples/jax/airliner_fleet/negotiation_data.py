@@ -99,10 +99,10 @@ class FlightSubproblem(Subproblem):
 
 x0 = np.concatenate([initial_guess(fl) for fl in flights])
 opt = ALBCD(subproblems=[FlightSubproblem(i) for i in range(N)], x0=x0, mu0=np.array([0.01]), max_mu=1e3,
-            rho=2.0, tau=0.5, feas_tol=1e-4, opt_tol=[1e-2, 1e-4], max_y=1e6, max_outer_iter=100,
+            rho=2.0, tau=0.5, feas_tol=1e-4, opt_tol=1e-4, max_y=1e6, max_outer_iter=100,
             max_inner_iter=20, verbose=False)
 opt.solve()
-print(f"ALBCD: {len(opt.feas_history)} sweeps, cost index {opt.y[0]:.4f} kg/s")
+print(f"ALBCD: {len(opt.history["feasibility"])} sweeps, cost index {opt.y[0]:.4f} kg/s")
 blocks = opt.x.reshape(N, nvar)
 
 
@@ -156,7 +156,7 @@ for i in range(N):
 solution = np.load(os.path.join(HERE, f"monolithic_solution_N{N}.npz"))
 np.savez(os.path.join(HERE, f"negotiation_N{N}.npz"),
          **{k: np.array(v) for k, v in history.items()},
-         opt_history=opt.opt_history, feas_history=opt.feas_history, tau0=taus(x0), T_budget=T_budget,
+         opt_history=opt.history["optimality"], feas_history=opt.history["feasibility"], tau0=taus(x0), T_budget=T_budget,
          ranges=ranges, masses=masses, tau_solution=blocks[:, -1], cost_index=opt.y[0],
          tau_monolithic=solution["tau"], cost_index_monolithic=float(solution["cost_index"]),
          curve_tau=np.array(curve_tau), curve_fuel=np.array(curve_fuel), curve_slope=np.array(curve_slope),

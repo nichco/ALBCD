@@ -99,7 +99,9 @@ class AeroSubproblem(Subproblem):
 
     X_SCALER = np.concatenate([np.full(num_cp_twist, 10.0), [1e-3]])  # twist_cp, weight_copy
     C_SCALER = 1e-2  # lift = weight_copy
-    FTOL = 1e-8      # SLSQP tolerance
+    # SLSQP tolerance. SLSQP stops on the change in the objective, so this block's KKT
+    # residual floors near sqrt(FTOL); with 1e-8 it stalls above the final opt_tol of 1e-3.
+    FTOL = 1e-12
 
     def setup(self) -> None:
         self._fns = compile_subproblem(self.objective, self.local_constraints)
@@ -146,13 +148,15 @@ class AeroSubproblem(Subproblem):
 class StructSubproblem(Subproblem):
     """Owns [thickness_cp, aero_loads_copy]: sizes the spar so both tip displacements equal the target."""
 
-    # thickness_cp, drag copies, lift copies. The drag loads are ~100x smaller than the lift
-    # loads, so they get their own scaler; a larger thickness scaler would magnify SLSQP's
-    # termination error in gradient(), which is measured in unscaled variables.
-    X_SCALER = np.concatenate([np.full(num_cp_thickness, 1e1), np.full(num_nodes, 1.0), np.full(num_nodes, 1e-2)])
+    # thickness_cp, then all the aero load copies. The penalty's curvature in every load copy is
+    # mu * f_scale**2, whatever the size of the load, so the drag and lift copies share one scaler.
+    # (A drag scaler of 1 made SLSQP's initial identity Hessian ~1e4 too stiff in the drag copies:
+    # it stopped on ftol before they moved, and their coupling constraints never converged.)
+    # A larger thickness scaler would magnify SLSQP's termination error in gradient(), which is
+    # measured in unscaled variables.
+    X_SCALER = np.concatenate([np.full(num_cp_thickness, 1e1), np.full(2 * num_nodes, 1e-2)])
     C_SCALER = 1e1  # tip displacements
-    # SLSQP tolerance. Tighter than AeroSubproblem's: with 1e-8, this block's residual
-    # stalls above the final opt_tol of 1e-3.
+    # SLSQP tolerance. With 1e-8, this block's residual stalls above the final opt_tol of 1e-3.
     FTOL = 1e-9
 
     # thickness_cp in [min gauge, smallest tube radius], aero_loads_copy unbounded. The
@@ -222,12 +226,13 @@ opt = ALBCD(subproblems=[AeroSubproblem(AERO_INDEX), StructSubproblem(STRUCT_IND
             x0=x0,
             mu0=np.ones(N_CON),
             data0={"weight": float(weight_init)},
-            max_mu=1e6,
+            # a larger penalty slows the Gauss-Seidel sweeps until the inner loop stalls
+            max_mu=1e2,
             rho=1.2,
             tau=0.5,
             feas_tol=3e-5,
-            opt_tol=[1e-1, 1e-3],
-            max_outer_iter=60,
+            opt_tol=1e-3,
+            max_outer_iter=100,
             max_inner_iter=10)
 
 opt.solve()
@@ -245,12 +250,12 @@ print('Lift (N): ', float(lift), '  Weight (N): ', float(weight))
 # compare with the monolithic solution (the same problem solved with one SLSQP)
 solution = np.load(os.path.join(HERE, 'monolithic_solution.npz'))
 x_star = np.concatenate([solution['twist_cp'], solution['thickness_cp']])
-history = np.array([np.concatenate([h[TWIST_SLICE], h[THICKNESS_SLICE]]) for h in opt.x_history])
-error = np.linalg.norm(history - x_star, axis=1) / np.linalg.norm(x_star)
+history = np.array([np.concatenate([h[TWIST_SLICE], h[THICKNESS_SLICE]]) for h in opt.history["x"]])
+error = np.linalg.norm(history - x_star, axis=1)  # ||x - x*||
 
 print('CD: ', opt.data['CD'])
 print('CD (monolithic): ', float(solution['CD']))
-print('Relative error: ', error[-1])
+print('||x - x*||: ', error[-1])
 
 
 twist = np.array(bspline_twist @ twist_cp)
@@ -268,27 +273,27 @@ plt.tight_layout()
 
 # optimality and feasibility after every subproblem solve, with their tolerances.
 # Optimality oscillates because solving one block leaves the other non-stationary.
-feas_iter = np.arange(1, len(opt.feas_history) + 1)
-opt_iter = np.arange(1, len(opt.opt_history) + 1)
+feas_iter = np.arange(1, len(opt.history["feasibility"]) + 1)
+opt_iter = np.arange(1, len(opt.history["optimality"]) + 1)
 
 fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(8, 2.25))
-ax1.semilogy(opt_iter, opt.opt_history, color='tab:blue', linewidth=2)
-# ax1.axhline(opt.opt_tol[-1], color='tab:gray', linewidth=1, linestyle='--', alpha=0.5)
-# ax1.annotate('Tolerance', xy=(0.3, opt.opt_tol[-1]), xycoords=('axes fraction', 'data'), xytext=(0, 3), textcoords='offset points', ha='center', color='tab:gray', fontsize=8)
+ax1.semilogy(opt_iter, opt.history["optimality"], color='tab:blue', linewidth=2)
+# ax1.axhline(opt.opt_tol, color='tab:gray', linewidth=1, linestyle='--', alpha=0.5)
+# ax1.annotate('Tolerance', xy=(0.3, opt.opt_tol), xycoords=('axes fraction', 'data'), xytext=(0, 3), textcoords='offset points', ha='center', color='tab:gray', fontsize=8)
 ax1.set_xlabel('Iteration')
 ax1.set_ylabel('Optimality')
 ax1.grid(color='lavender', alpha=0.5, axis='y')
 
-ax2.semilogy(feas_iter, opt.feas_history, color='tab:orange', linewidth=2)
+ax2.semilogy(feas_iter, opt.history["feasibility"], color='tab:orange', linewidth=2)
 # ax2.axhline(opt.feas_tol, color='tab:gray', linewidth=1, linestyle='--', alpha=0.5)
 # ax2.annotate('Tolerance', xy=(0.3, opt.feas_tol), xycoords=('axes fraction', 'data'), xytext=(0, 3), textcoords='offset points', ha='center', color='tab:gray', fontsize=8)
 ax2.set_xlabel('Iteration')
 ax2.set_ylabel('Feasibility')
 ax2.grid(color='lavender', alpha=0.5, axis='y')
 
-ax3.semilogy(error, linewidth=2, color='tab:red')
+ax3.plot(np.log10(error), linewidth=2, color='tab:red')
 ax3.set_xlabel('Iteration')
-ax3.set_ylabel('Relative error')
+ax3.set_ylabel(r"$\log_{10}\Vert x - x^*\Vert$")
 ax3.grid(color='lavender', alpha=0.5, axis='y')
 
 plt.tight_layout()
@@ -300,6 +305,6 @@ plt.show()
 
 
 # np.savez(os.path.join(HERE, 'aerostruct_albcd_rho1.2.npz'),
-#          opt_history=opt.opt_history,
-#          feas_history=opt.feas_history,
+#          opt_history=opt.history["optimality"],
+#          feas_history=opt.history["feasibility"],
 #          error=error)

@@ -27,22 +27,23 @@ for k, (name, label, color, ls, marker) in enumerate(methods):
                  markevery=(0.02 * k, 0.1))  # every 10% of the axes diagonal, staggered by line
     opt.plot(sweeps, d[f"{name}_opt_history"], label=label, **style)
     feas.plot(sweeps, d[f"{name}_feas_history"], **style)
-    err.plot(sweeps, d[f"{name}_error"], **style)
+    err.plot(sweeps, np.log10(d[f"{name}_error"]), **style)
     # where each method stops
     for a, key in ((opt, "opt_history"), (feas, "feas_history"), (err, "error")):
-        a.plot(sweeps[-1], d[f"{name}_{key}"][-1], marker=marker, color=color, ms=4.5, ls="none")
+        last = d[f"{name}_{key}"][-1]
+        a.plot(sweeps[-1], np.log10(last) if a is err else last, marker=marker, color=color, ms=4.5, ls="none")
 
-for a, label in ((opt, "Optimality residual"), (feas, "Feasibility"), (err, "Relative error in $x$")):
-    a.set_yscale("log")
+for a, label in ((opt, "Optimality residual"), (feas, "Feasibility"), (err, r"$\log_{10}\Vert x - x^*\Vert$")):
+    if a is not err:  # err holds log10 values
+        a.set_yscale("log")
     a.xaxis.set_minor_locator(NullLocator())
     a.yaxis.set_minor_locator(NullLocator())
     a.set_ylabel(label)
-    a.set_xlabel("Iteration")
+    a.set_xlabel("Cumulative BCD sweeps")
 
 fig.legend(*opt.get_legend_handles_labels(), loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=3,
            handlelength=2.6, frameon=False)
 
 fig.tight_layout()
 fig.savefig(os.path.join(HERE, "fig_cessna_comparison.pdf"), bbox_inches="tight", pad_inches=0.02)
-fig.savefig(os.path.join(HERE, "fig_cessna_comparison.png"), bbox_inches="tight", pad_inches=0.02, dpi=300)
 plt.show()

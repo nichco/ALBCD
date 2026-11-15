@@ -229,9 +229,9 @@ opt = ALBCD(subproblems=[ArcSubproblem(i) for i in range(N)],
             rho=1.5,
             tau=0.5,
             feas_tol=1e-6,
-            opt_tol=[1e-2, 3e-4],
+            opt_tol=3e-4,
             max_y=1e6,
-            max_outer_iter=200,
+            max_outer_iter=1000,
             max_inner_iter=100)
 
 opt.solve()
@@ -239,12 +239,12 @@ opt.solve()
 
 blocks = opt.x.reshape(N, nv)
 tf = sum(float(arc_time(v)) for v in blocks)
-error = np.linalg.norm(np.array(opt.x_history) - x_star, axis=1) / np.linalg.norm(x_star)
+error = np.linalg.norm(np.array(opt.history["x"]) - x_star, axis=1)  # ||x - x*||
 print(f"ALBCD ({N} arcs, {m} segments each): tf {tf:.6f} ({tf * T_s:.1f} s), "
       f"segment durations {np.array2string(blocks[:, 4], precision=6)}")
 print(f"Max coupling violation: {np.max(np.abs(opt.phi)):.2e}, "
       f"max local violation: {np.max(np.abs(np.asarray(monolithic_constraints(jnp.asarray(opt.x))))):.2e}")
-print(f"tf error vs monolithic: {abs(tf - tf_star) / tf_star:.2e}, relative error in x: {error[-1]:.2e}")
+print(f"tf error vs monolithic: {abs(tf - tf_star) / tf_star:.2e}, ||x - x*|| {error[-1]:.2e}")
 
 
 def plot_trajectory(ax, x, labels=True, **kwargs):
@@ -271,12 +271,12 @@ plot_trajectory(ax, opt.x)
 fig.tight_layout()
 
 fig, ax = plt.subplots(1, 2, figsize=(8, 2.5))
-ax[0].semilogy(error, linewidth=2, color="tab:blue")
+ax[0].plot(np.log10(error), linewidth=2, color="tab:blue")
 ax[0].set_xlabel("Subproblem solve")
-ax[0].set_ylabel("Relative error")
+ax[0].set_ylabel(r"$\log_{10}\Vert x - x^*\Vert$")
 ax[0].grid(color="lavender", alpha=0.5, axis="y")
 
-ax[1].semilogy(opt.feas_history, linewidth=2, color="tab:orange")
+ax[1].semilogy(opt.history["feasibility"], linewidth=2, color="tab:orange")
 ax[1].axhline(opt.feas_tol, color="gray", linewidth=1, linestyle="--")
 ax[1].set_xlabel("Sweep")
 ax[1].set_ylabel("Feasibility")
@@ -285,7 +285,7 @@ ax[1].grid(color="lavender", alpha=0.5, axis="y")
 plt.tight_layout()
 
 # convergence gif: the trajectory after each sweep (at most 200 frames) over the monolithic solution in gray
-sweeps = np.array(opt.x_history)[N::N]
+sweeps = np.array(opt.history["x"])[N::N]
 fig, ax = plt.subplots(1, 2, figsize=(10, 3.8))
 
 
@@ -296,7 +296,7 @@ def draw(k):
     plot_trajectory(ax, sweeps[k])
     ax[0].set(xlim=(-10, 250), ylim=(-10, 150))
     ax[1].set(xlim=(0, 1), ylim=(-90, 90))
-    fig.suptitle(f"Sweep {k + 1} of {len(sweeps)}, max|phi| = {opt.feas_history[k]:.1e}")
+    fig.suptitle(f"Sweep {k + 1} of {len(sweeps)}, max|phi| = {opt.history["feasibility"][k]:.1e}")
     fig.tight_layout()
 
 

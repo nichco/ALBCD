@@ -16,12 +16,12 @@ for mu0 in mu0s:
     print(f"\n=== mu0 = {mu0:.3g} ===")
     opt = make_albcd(mu0=mu0)
     opt.solve()
-    opt_history.append(np.array(opt.opt_history))
-    feas_history.append(np.array(opt.feas_history))
-    error.append(design_error(opt.x_history))
+    opt_history.append(np.array(opt.history["optimality"]))
+    feas_history.append(np.array(opt.history["feasibility"]))
+    error.append(design_error(opt.history["x"]))
     success.append(opt.success)
-    print(f"mu0 = {mu0:.3g}: {len(opt.feas_history)} sweeps, success {opt.success}, "
-          f"relative error {error[-1][-1]:.2e}")
+    print(f"mu0 = {mu0:.3g}: {len(opt.history["feasibility"])} sweeps, success {opt.success}, "
+          f"||x - x*|| {error[-1][-1]:.2e}")
 
 
 def ragged(arrays):

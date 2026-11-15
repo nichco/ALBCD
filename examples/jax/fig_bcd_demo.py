@@ -23,9 +23,9 @@ def run(name):
     return script
 
 
-rosenbrock = np.array(run("2d_rosenbrock.py")["opt"].x_history)  # (x1, x2)
+rosenbrock = np.array(run("2d_rosenbrock.py")["history"])  # (x1, x2)
 wing = run("wing_design.py")
-wing_history = np.array(wing["opt"].x_history)  # (span, chord)
+wing_history = np.array(wing["history"])  # (span, chord)
 power_required = wing["power_required"]
 
 plt.rcParams.update({"font.family": "STIXGeneral", "mathtext.fontset": "stix", "font.size": 10,

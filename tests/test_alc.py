@@ -32,7 +32,8 @@ def test_matches_albcd_with_equivalent_settings():
     kw = dict(feas_tol=1e-6, max_outer_iter=5, verbose=False)
     alc = ALC(blocks(), np.zeros(2), np.ones(1), objective, phi0=np.zeros(1), beta=1.0, inner_tol=1e-15,
               max_inner_iter=500, **kw).solve()
-    albcd = ALBCD(blocks(), np.zeros(2), mu0=np.ones(1), rho=1.0, opt_tol=1e-12, max_inner_iter=500, **kw).solve()
+    albcd = ALBCD(blocks(), np.zeros(2), mu0=np.ones(1), rho=1.0, opt_tol=1e-12, kappa=0.0,  # exact inner loop
+                  max_inner_iter=500, **kw).solve()
     np.testing.assert_allclose(alc.y, albcd.y, atol=1e-8)
     np.testing.assert_allclose(alc.x, albcd.x, atol=1e-8)
 

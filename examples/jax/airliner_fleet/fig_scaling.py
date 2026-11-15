@@ -36,13 +36,12 @@ ax[1].set_ylim(0, None)
 # solves per flight (the number of sweeps) vs. solution error, one sequential hue light to dark with N
 for n, color in zip(error_sizes, plt.cm.Oranges(np.linspace(0.35, 1.0, len(error_sizes)))):
     d = np.load(os.path.join(HERE, f"solves_v_error_N{n}.npz"))
-    ax[2].plot(d["target"][d["reached"]], d["solves"][d["reached"]] / n, color=color, marker="o", lw=1.2,
+    ax[2].plot(np.log10(d["target"][d["reached"]]), d["solves"][d["reached"]] / n, color=color, marker="o", lw=1.2,
                ms=3, mfc="w", mew=0.8, label=f"$N = {n}$")
-ax[2].set_xscale("log")
 ax[2].invert_xaxis()  # tighter errors to the right
 ax[2].set_ylim(0, 1.5 * ax[2].get_ylim()[1])  # headroom for the legend
 ax[2].yaxis.set_major_locator(MultipleLocator(10))
-ax[2].set_xlabel("Relative error in $x$")
+ax[2].set_xlabel(r"$\log_{10}\Vert x - x^*\Vert$")
 ax[2].set_ylabel("Subproblem solves / $N$")
 ax[2].legend(loc="upper left", ncol=2, handlelength=1.8, columnspacing=1.0)
 

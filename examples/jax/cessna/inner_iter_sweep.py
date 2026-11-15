@@ -47,14 +47,14 @@ for n_inner in inner_iters:
     t0 = time.perf_counter()
     opt.solve()
 
-    opt_history.append(np.array(opt.opt_history))
-    feas_history.append(np.array(opt.feas_history))
-    error.append(design_error(opt.x_history))
+    opt_history.append(np.array(opt.history["optimality"]))
+    feas_history.append(np.array(opt.history["feasibility"]))
+    error.append(design_error(opt.history["x"]))
     t_sweep.append(np.array(residual_times) - t0)
     t_solve.append(np.concatenate([[0.0], np.array(solve_times) - t0]))  # x0 at t = 0
     success.append(opt.success)
-    print(f"max_inner_iter = {n_inner}: {len(opt.feas_history)} sweeps, {t_sweep[-1][-1]:.1f} s, "
-          f"success {opt.success}, relative error {error[-1][-1]:.2e}")
+    print(f"max_inner_iter = {n_inner}: {len(opt.history["feasibility"])} sweeps, {t_sweep[-1][-1]:.1f} s, "
+          f"success {opt.success}, ||x - x*|| {error[-1][-1]:.2e}")
 
 
 def ragged(arrays):

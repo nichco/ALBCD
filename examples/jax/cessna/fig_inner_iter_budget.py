@@ -25,10 +25,11 @@ for k, n_inner in enumerate(d["max_inner_iter"]):
     # optimality and feasibility at the end of each sweep, error after each block solve
     opt.plot(d["t_sweep"][k], d["opt_history"][k], label=label, **style)
     feas.plot(d["t_sweep"][k], d["feas_history"][k], **style)
-    err.plot(d["t_solve"][k], d["error"][k], **style)
+    err.plot(d["t_solve"][k], np.log10(d["error"][k]), **style)
 
-for a, label in ((opt, "Optimality residual"), (feas, "Feasibility"), (err, "Relative error in $x$")):
-    a.set_yscale("log")
+for a, label in ((opt, "Optimality residual"), (feas, "Feasibility"), (err, r"$\log_{10}\Vert x - x^*\Vert$")):
+    if a is not err:  # err holds log10 values
+        a.set_yscale("log")
     a.xaxis.set_minor_locator(NullLocator())
     a.yaxis.set_minor_locator(NullLocator())
     a.set_ylabel(label)

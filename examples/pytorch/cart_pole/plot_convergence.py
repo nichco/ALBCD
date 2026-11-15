@@ -25,13 +25,14 @@ for N, color in zip((2, 3, 4), ("tab:blue", "tab:orange", "tab:green")):
     iterations = np.arange(1, len(data["feas_history"]) + 1)
     ax1.semilogy(iterations, data["opt_history"], color=color, linewidth=2, label=f"N = {N}")
     ax2.semilogy(iterations, data["feas_history"], color=color, linewidth=2)
-    ax3.semilogy(np.arange(len(data["error"])), data["error"], color=color, linewidth=2)
+    ax3.plot(np.arange(len(data["error"])), np.log10(data["error"]), color=color, linewidth=2)
 
 # final tolerances, the same for every N
-ax1.axhline(data["opt_tol"][-1], color="gray", linewidth=1, linestyle="--", alpha=0.8)
+ax1.axhline(np.atleast_1d(data["opt_tol"])[-1],  # older files hold a list of phase tolerances
+            color="gray", linewidth=1, linestyle="--", alpha=0.8)
 ax2.axhline(data["feas_tol"], color="gray", linewidth=1, linestyle="--", alpha=0.8)
 
-for ax, label in zip((ax1, ax2, ax3), ("Optimality", "Feasibility", "Relative error")):
+for ax, label in zip((ax1, ax2, ax3), ("Optimality", "Feasibility", r"$\log_{10}\Vert x - x^*\Vert$")):
     ax.set_xlabel("Subproblem solve")
     ax.set_ylabel(label)
     ax.grid(color="lavender", alpha=0.5, axis="y")

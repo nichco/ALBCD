@@ -5,10 +5,9 @@ of stopping at ALBCD's convergence test, so the runs can be compared at equal wa
 Writes cessna_inner_iter_budget.npz, for fig_inner_iter_budget.py.
 
 ALBCD itself is unchanged:
-- ALBCD stops when it is feasible in the last opt_tol phase. In any earlier phase, becoming
-  feasible updates the multipliers and penalties and starts the next phase, which is the same as
-  another outer iteration. Repeating the final tolerance many times therefore runs the same
-  algorithm without the final stop.
+- ALBCD's solve() stops once the iterate is both feasible and optimal, and it uses the value
+  returned by _block_coordinate_descent() only for that test. Each run wraps that method so that
+  it returns inf, which runs the same algorithm without the stop.
 - Each subproblem solve checks the clock first and raises BudgetSpent once the budget is used up.
   The histories are appended as the solve goes, so they are complete up to that point.
 """
@@ -44,7 +43,8 @@ opt_history, feas_history, error, t_sweep, t_solve = [], [], [], [], []
 for n_inner in inner_iters:
     print(f"\n=== max_inner_iter = {n_inner} ===")
     opt = make_albcd(max_inner_iter=n_inner)
-    opt.opt_tol = np.concatenate([opt.opt_tol, np.full(10_000, opt.opt_tol[-1])])  # no final stop (see above)
+    bcd = opt._block_coordinate_descent
+    opt._block_coordinate_descent = lambda tol: (bcd(tol), np.inf)[1]  # no final stop (see above)
     opt.max_outer_iter = 10**9                                   # the budget ends the run instead
     opt.verbose = False
 
@@ -71,14 +71,14 @@ for n_inner in inner_iters:
 
     # a sweep cut off by the budget may have one block solve without the sweep's residuals
     n_sweeps = len(residual_times)
-    opt_history.append(np.array(opt.opt_history[:n_sweeps]))
-    feas_history.append(np.array(opt.feas_history[:n_sweeps]))
-    error.append(design_error(opt.x_history))
+    opt_history.append(np.array(opt.history["optimality"][:n_sweeps]))
+    feas_history.append(np.array(opt.history["feasibility"][:n_sweeps]))
+    error.append(design_error(opt.history["x"]))
     t_sweep.append(np.array(residual_times) - t0)
     t_solve.append(np.concatenate([[0.0], np.array(solve_times) - t0]))  # x0 at t = 0
     print(f"max_inner_iter = {n_inner}: {n_sweeps} sweeps in {t_sweep[-1][-1]:.1f} s, "
           f"optimality {opt_history[-1][-1]:.2e}, feasibility {feas_history[-1][-1]:.2e}, "
-          f"relative error {error[-1][-1]:.2e}")
+          f"||x - x*|| {error[-1][-1]:.2e}")
 
 
 def ragged(arrays):

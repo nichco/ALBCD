@@ -26,12 +26,13 @@ for k, n in enumerate(sizes):
     opt.plot(sweeps, d["opt_history"], label=f"$N = {n}$", **style)
     feas.plot(sweeps, d["feas_history"], **style)
     if len(d["error"]):
-        err.plot(np.arange(len(d["error"])) / n, d["error"], **{**style, "markevery": 4 * n})
+        err.plot(np.arange(len(d["error"])) / n, np.log10(d["error"]), **{**style, "markevery": 4 * n})
 
 
 for a, label in ((opt, "Optimality residual"), (feas, "Feasibility"),
-                 (err, "Relative error in $x$")):
-    a.set_yscale("log")
+                 (err, r"$\log_{10}\Vert x - x^*\Vert$")):
+    if a is not err:  # err already holds log10 values
+        a.set_yscale("log")
     a.xaxis.set_minor_locator(NullLocator())
     a.yaxis.set_minor_locator(NullLocator())
     a.set_ylabel(label)

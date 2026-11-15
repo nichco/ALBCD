@@ -5,7 +5,7 @@ from scipy.optimize import BFGS
 from types import SimpleNamespace
 from collections import defaultdict
 
-class ALBCD2():
+class ALBCD():
 
 
     def __init__(self,
@@ -113,7 +113,7 @@ class ALBCD2():
 
         return optimality
 
-    def solve(self) -> "ALBCD2":
+    def solve(self) -> "ALBCD":
 
         t0 = time.perf_counter()
         feas_tol = self.feas_tol
@@ -135,7 +135,7 @@ class ALBCD2():
                 self.success = True
                 break
 
-            # previous behavior: stop as soon as the iterate is feasible
+            # old: stop as soon as the iterate is feasible
             # if feas <= feas_tol:
             #     self.success = optimality <= opt_tol
             #     break
@@ -292,7 +292,7 @@ if __name__ == "__main__":
 
     v_init = np.array([-0.5, 0.0, 1.0])
 
-    opt = ALBCD2(subproblems=[Subproblem1(index=slice(0, 2)), # owns x1 and s
+    opt = ALBCD(subproblems=[Subproblem1(index=slice(0, 2)), # owns x1 and s
                             Subproblem2(index=slice(2, 3))], # owns x2
                 x0=np.array(v_init),
                 mu0=np.array([1.0]),

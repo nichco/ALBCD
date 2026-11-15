@@ -19,10 +19,11 @@ style = dict(color="#0072B2", ls="-", marker="o", lw=1.2, ms=3, mfc="w", mew=0.8
 fig, (opt, feas, err) = plt.subplots(1, 3, figsize=(7, 2), sharex=True)
 opt.plot(sweeps, d["opt_history"], **style)
 feas.plot(sweeps, d["feas_history"], **style)
-err.plot(np.arange(len(d["error"])) / n, d["error"], **style)
+err.plot(np.arange(len(d["error"])) / n, np.log10(d["error"]), **style)
 
-for a, label in ((opt, "Optimality residual"), (feas, "Feasibility"), (err, "Relative error in $x$")):
-    a.set_yscale("log")
+for a, label in ((opt, "Optimality residual"), (feas, "Feasibility"), (err, r"$\log_{10}\Vert x - x^*\Vert$")):
+    if a is not err:  # err holds log10 values
+        a.set_yscale("log")
     a.xaxis.set_minor_locator(NullLocator())
     a.yaxis.set_minor_locator(NullLocator())
     a.set_ylabel(label)

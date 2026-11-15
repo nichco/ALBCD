@@ -106,7 +106,7 @@ opt = ALBCD(subproblems=[ScenarioSubproblem(i) for i in range(N)],
             rho=1.3,
             tau=0.5,
             feas_tol=1e-5,
-            opt_tol=[1e-3, 1e-5],
+            opt_tol=1e-5,
             max_y=1e6,
             max_outer_iter=100,
             max_inner_iter=20)
@@ -127,10 +127,10 @@ if os.path.exists(reference):
     solution = np.load(reference)
     x_star = np.concatenate([np.concatenate([[solution["l"], solution["mp"]], solution["states"][i].ravel(), solution["u"][i]])
                              for i in range(N)])
-    error = np.linalg.norm(np.array(opt.x_history) - x_star, axis=1) / np.linalg.norm(x_star)
+    error = np.linalg.norm(np.array(opt.history["x"]) - x_star, axis=1)  # ||x - x*||
     print(f"Monolithic: l {float(solution['l']):.4f} m, mp {float(solution['mp']):.4f} kg, "
           f"effort {float(solution['effort']):.2f}")
-    print("Relative error: ", error[-1])
+    print('||x - x*||: ', error[-1])
 else:
     error = None
     print(f"No monolithic solution for N = {N}; run monolithic.py to create it.")
@@ -138,7 +138,7 @@ else:
 # convergence data, for plotting without rerunning the solve. opt_history and feas_history have one
 # entry per sweep; error has one per subproblem solve, and a leading entry for x0
 np.savez(os.path.join(HERE, f"convergence_N{N}.npz"),
-         opt_history=opt.opt_history, feas_history=opt.feas_history,
+         opt_history=opt.history["optimality"], feas_history=opt.history["feasibility"],
          error=np.array([]) if error is None else error,
          opt_tol=opt.opt_tol, feas_tol=opt.feas_tol, x=opt.x, success=opt.success, time=opt.tf)
 
@@ -159,12 +159,12 @@ fig.tight_layout()
 
 fig, ax = plt.subplots(1, 2, figsize=(8, 2.5))
 if error is not None:
-    ax[0].semilogy(error, linewidth=2, color="tab:blue")
+    ax[0].plot(np.log10(error), linewidth=2, color="tab:blue")
 ax[0].set_xlabel("Subproblem solve")
-ax[0].set_ylabel("Relative error")
+ax[0].set_ylabel(r"$\log_{10}\Vert x - x^*\Vert$")
 ax[0].grid(color="lavender", alpha=0.5, axis="y")
 
-ax[1].semilogy(opt.feas_history, linewidth=2, color="tab:orange")
+ax[1].semilogy(opt.history["feasibility"], linewidth=2, color="tab:orange")
 ax[1].axhline(opt.feas_tol, color="gray", linewidth=1, linestyle="--", alpha=0.8)
 ax[1].set_xlabel("Sweep")
 ax[1].set_ylabel("Feasibility")

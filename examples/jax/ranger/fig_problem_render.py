@@ -129,5 +129,4 @@ for left_edge, mappable, label in (
     cb.set_label(label, fontsize=14, labelpad=2)
 
 fig.savefig(os.path.join(HERE, "fig_problem_render.pdf"), bbox_inches="tight", pad_inches=0.02, dpi=300)
-fig.savefig(os.path.join(HERE, "fig_problem_render.png"), bbox_inches="tight", pad_inches=0.02, dpi=200)
 plt.show()

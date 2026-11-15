@@ -19,12 +19,12 @@ for tau in taus:
     print(f"\n=== tau = {tau:g} ===")
     opt = make_albcd(tau=tau)
     opt.solve()
-    opt_history.append(np.array(opt.opt_history))
-    feas_history.append(np.array(opt.feas_history))
-    error.append(design_error(opt.x_history))
+    opt_history.append(np.array(opt.history["optimality"]))
+    feas_history.append(np.array(opt.history["feasibility"]))
+    error.append(design_error(opt.history["x"]))
     success.append(opt.success)
-    print(f"tau = {tau:g}: {len(opt.feas_history)} sweeps, {opt.tf:.1f} s, success {opt.success}, "
-          f"relative error {error[-1][-1]:.2e}")
+    print(f"tau = {tau:g}: {len(opt.history["feasibility"])} sweeps, {opt.tf:.1f} s, success {opt.success}, "
+          f"||x - x*|| {error[-1][-1]:.2e}")
 
 
 def ragged(arrays):

@@ -14,7 +14,7 @@ Compared with cessna_comparison.py (the example's settings):
   aero, then structures). Their stopping tests are switched off, and each run records the sweep at
   which its own test (feasibility 1e-5, optimality 3e-5 for ALBCD and ADMM; ALC's Eqs. 26-27 with
   epsilon = 1e-5) would have stopped it. Past that sweep every method keeps running its own
-  iteration unchanged: ALBCD more outer iterations of its final phase, ALC more outer iterations
+  iteration unchanged: ALBCD more outer iterations, ALC more outer iterations
   with its Eq. 25 weight update, ADMM more sweeps with its fixed penalty
 - ALBCD starts from mu0 = 0.1, ALC from the initial weight of its Eq. 29, and ADMM uses a fixed
   mu = 0.1 (admm_small) or 10 (admm_large)
@@ -57,7 +57,7 @@ from albcd import ALBCD, ALC, ADMM, initial_penalty  # noqa: E402
 
 FTOL = 1e-13      # blocks' SLSQP tolerance
 FEAS_TOL = 1e-5   # feasibility tolerance (ALC's epsilon, ADMM's primal tolerance)
-OPT_TOL = 3e-5    # optimality tolerance: ALBCD's final phase, ADMM's dual tolerance
+OPT_TOL = 3e-5    # optimality tolerance: ALBCD's opt_tol, ADMM's dual tolerance
 MU_ALBCD = 0.1    # ALBCD's initial penalty
 MU_ADMM = {"admm_small": 0.1, "admm_large": 10.0}  # ADMM's fixed penalties
 
@@ -126,9 +126,9 @@ else:
 
 
 def design_error(x_history):
-    """Relative error in [twist_cp, thickness_cp] against the tight reference."""
+    """||x - x*|| in [twist_cp, thickness_cp] against the tight reference."""
     h = np.array([np.concatenate([x[C.TWIST_SLICE], x[C.THICKNESS_SLICE]]) for x in x_history])
-    return np.linalg.norm(h - ref, axis=1) / np.linalg.norm(ref)
+    return np.linalg.norm(h - ref, axis=1)  # ||x - x*||
 
 
 # --- sweep budget and cost: cumulative SLSQP iterations after every sweep ---
@@ -172,20 +172,29 @@ def subproblems(budget=True):
 class RecordingALBCD(ALBCD):
     """ALBCD that records its multiplier updates and where its stopping test would stop it.
 
-    It runs with the phase tolerances [1e-1, OPT_TOL, OPT_TOL, ...]: a phase ends when an outer
-    iteration ends feasible, which in the final phase is where ALBCD stops. With repeated final
-    phases it carries on with identical iterations instead; the stop would be the second feasible
-    outer iteration (the first ends phase 1)."""
+    ALBCD stops after the first outer iteration that ends both feasible and optimal. Its solve()
+    uses the value returned by _block_coordinate_descent() only for that test, so returning inf
+    there switches the stop off and leaves the iterations unchanged. The sweeps at which the test
+    is met are recorded instead; the stop is the first of them."""
 
     def __init__(self, *a, **k):
         super().__init__(*a, **k)
-        self.updates, self.feasible_outer = [], []
+        self.updates, self.stops = [], []
 
-    def _update_mu(self, c_new, c_old):  # called right after every multiplier update
+    # the history names that ALC and ADMM use, so that the results below are read the same way
+    feas_history = property(lambda self: self.history["feasibility"])
+    opt_history = property(lambda self: self.history["optimality"])
+    x_history = property(lambda self: self.history["x"])
+
+    def _block_coordinate_descent(self, opt_tol):
+        optimality = super()._block_coordinate_descent(opt_tol)
+        if np.max(np.abs(self.phi)) <= self.feas_tol and optimality <= self.opt_tol:  # ALBCD's stopping test
+            self.stops.append(len(self.feas_history))
+        return np.inf  # solve() uses this value only for its stopping test
+
+    def _update_mu(self, mu, phi_new, phi_old):  # called right after every multiplier update
         self.updates.append(len(self.feas_history))
-        if np.max(np.abs(c_new)) <= self.feas_tol:
-            self.feasible_outer.append(len(self.feas_history))
-        return super()._update_mu(c_new, c_old)
+        return super()._update_mu(mu, phi_new, phi_old)
 
 
 class RecordingALC(ALC):
@@ -219,7 +228,7 @@ for run in args.runs:
     if run == "albcd":
         mu0 = MU_ALBCD
         opt = RecordingALBCD(subproblems=subproblems(), x0=C.x0, mu0=np.full(C.N_CON, mu0), data0=data0,
-                             max_mu=1e6, rho=1.2, tau=0.5, feas_tol=FEAS_TOL, opt_tol=[1e-1] + [OPT_TOL] * N_SWEEPS,
+                             max_mu=1e6, rho=1.2, tau=0.5, feas_tol=FEAS_TOL, opt_tol=OPT_TOL,
                              max_outer_iter=10 * N_SWEEPS, max_inner_iter=200, verbose=False)
     elif run == "alc":
         # Eq. 29: one inner loop with a small penalty estimates the coupling constraints, then the
@@ -246,7 +255,7 @@ for run in args.runs:
     feas, res = np.array(opt.feas_history), np.array(opt.opt_history)
     if run == "albcd":
         updates = opt.updates
-        stop = opt.feasible_outer[1] if len(opt.feasible_outer) > 1 else 0
+        stop = opt.stops[0] if opt.stops else 0
     elif run == "alc":
         updates = list(np.flatnonzero(np.diff(opt.outer_history)) + 1)
         stop = opt.stops[0] if opt.stops else 0
@@ -263,6 +272,6 @@ for run in args.runs:
     at = (f"its stopping test is met at sweep {stop} (optimality residual {res[stop - 1]:.2e}, "
           f"error {r['error'][stop - 1]:.2e})" if stop else "its stopping test is never met")
     print(f"{run}: {len(feas)} sweeps, {len(updates)} multiplier updates, {nit_history[-1]} SLSQP iterations, "
-          f"final optimality residual {res[-1]:.2e}, feasibility {feas[-1]:.2e}, relative error "
+          f"final optimality residual {res[-1]:.2e}, feasibility {feas[-1]:.2e}, ||x - x*|| "
           f"{r['error'][-1]:.2e}; {at}; mu0 {mu0:.3g}, max mu {r['max_mu']:.3g}, {r['time']:.0f} s", flush=True)
     update_results({f"{run}_{key}": value for key, value in r.items()})

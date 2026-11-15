@@ -59,13 +59,15 @@ rho_ks_thick = 100.0  # KS aggregation parameter for the min thickness (1/mm)
 
 # design variables: B-spline control points for the twist (rad) and the wall thickness (m)
 num_cp_twist = 7
-num_cp_thickness = 10
+num_cp_thickness = 11  # odd, so that a knot sits at the root (with an even count one cubic piece straddles it)
 bspline_twist = jnp.asarray(get_bspline_mtx(num_cp_twist, np.linspace(0, 1, num_nodes)))
 bspline_thickness = jnp.asarray(get_bspline_mtx(num_cp_thickness, np.linspace(0, 1, num_elems)))
 
 twist_cp0 = np.ones(num_cp_twist) * np.deg2rad(3)
-thickness_cp0 = np.concatenate([np.linspace(min_gauge, 0.01, num_cp_thickness // 2),
-                                np.linspace(0.01, min_gauge, num_cp_thickness // 2)])
+# thickest at the root, symmetric; with an odd count the root control point is the peak
+_half = (num_cp_thickness + 1) // 2
+thickness_cp0 = np.concatenate([np.linspace(min_gauge, 0.01, _half),
+                                np.linspace(0.01, min_gauge, _half)[num_cp_thickness % 2:]])
 
 
 def aero_model(twist_cp):

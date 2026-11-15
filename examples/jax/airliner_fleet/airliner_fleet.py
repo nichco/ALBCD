@@ -137,7 +137,7 @@ opt = ALBCD(subproblems=[FlightSubproblem(i) for i in range(N)],
             rho=2.0,
             tau=0.5,
             feas_tol=1e-4,
-            opt_tol=[1e-2, 1e-4],
+            opt_tol=1e-4,
             max_y=1e6,
             max_outer_iter=100,
             max_inner_iter=20)
@@ -159,10 +159,10 @@ reference = os.path.join(HERE, f"monolithic_solution_N{N}.npz")
 if os.path.exists(reference):
     solution = np.load(reference)
     scale = np.tile(x_scaler, N)
-    error = np.linalg.norm((np.array(opt.x_history) - solution["z"]) * scale, axis=1) / np.linalg.norm(solution["z"] * scale)
+    error = np.linalg.norm((np.array(opt.history["x"]) - solution["z"]) * scale, axis=1)  # ||x - x*||
     print(f"Monolithic: fleet fuel {solution['fuel'].sum():.1f} kg, cost index {float(solution['cost_index']):.4f} kg/s, "
           f"solve time {float(solution['time']):.1f} s")
-    print(f"Fleet fuel difference: {fuel_kg.sum() - solution['fuel'].sum():+.2f} kg, relative error in x: {error[-1]:.2e}")
+    print(f"Fleet fuel difference: {fuel_kg.sum() - solution['fuel'].sum():+.2f} kg, ||x - x*|| {error[-1]:.2e}")
 else:
     error = None
     print(f"No monolithic solution for N = {N}; run monolithic.py to create it.")
@@ -171,10 +171,10 @@ else:
 # entry per sweep; error has one per subproblem solve, and a leading entry for x0
 
 np.savez(os.path.join(HERE, f"fleet_albcd_N{N}.npz"),
-         opt_history=opt.opt_history, feas_history=opt.feas_history, y_history=y_history,
+         opt_history=opt.history["optimality"], feas_history=opt.history["feasibility"], y_history=y_history,
          error=np.array([]) if error is None else error, x=opt.x, fuel=fuel_kg, cost_index=opt.y[0],
          ranges=ranges, masses=masses, feas_tol=opt.feas_tol, opt_tol=opt.opt_tol,
-         success=opt.success, time=opt.tf, solves=len(opt.x_history) - 1,
+         success=opt.success, time=opt.tf, solves=len(opt.history["x"]) - 1,
          peak_memory=memory, peak_memory_before_solve=memory_before)
 
 
@@ -188,7 +188,7 @@ from models import simulate
 plt.rcParams.update({"font.size": 9, "axes.grid": True,
                      "axes.grid.axis": "y", "grid.color": "0.92", "axes.axisbelow": True})
 
-sweeps = np.array(opt.x_history)[::N]  # x0, then x after each sweep
+sweeps = np.array(opt.history["x"])[::N]  # x0, then x after each sweep
 tau_history = sweeps[:, nvar - 1::nvar]  # block-time allocations (ks)
 sims = [[simulate(jnp.asarray(v), fl) for v, fl in zip(x.reshape(N, nvar), flights)] for x in sweeps]
 cmap = ListedColormap(plt.cm.plasma(np.linspace(0, 0.85, 256)))

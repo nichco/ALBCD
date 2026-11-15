@@ -30,9 +30,9 @@ for i, (rho, color) in enumerate(zip(RHOS, COLORS)):
     ax1.semilogy(iterations, data["opt_history"], color=color, linewidth=2, label=rf"$\rho$ = {rho}", alpha=0.8,
                  zorder=2 + len(RHOS) - i)
     ax2.semilogy(iterations, data["feas_history"], color=color, linewidth=2)
-    ax3.semilogy(np.arange(len(data["error"])), data["error"], color=color, linewidth=2)
+    ax3.plot(np.arange(len(data["error"])), np.log10(data["error"]), color=color, linewidth=2)
 
-for ax, label in zip((ax1, ax2, ax3), ("Optimality", "Feasibility", "Relative error")):
+for ax, label in zip((ax1, ax2, ax3), ("Optimality", "Feasibility", r"$\log_{10}\Vert x - x^*\Vert$")):
     ax.set_xlabel("Iteration")
     ax.set_ylabel(label)
     ax.grid(color="lavender", alpha=0.5, axis="y")

@@ -48,10 +48,14 @@ def subproblems():
 
 def results(opt, mu0):
     """Histories with one entry per sweep. Every sweep solves both blocks, so x after sweep k is
-    x_history[2k]."""
-    return dict(opt_history=np.array(opt.opt_history), feas_history=np.array(opt.feas_history),
-                error=C.design_error(opt.x_history[2::2]), success=opt.success, mu0=mu0, x=opt.x,
-                time=opt.tf, sweeps=len(opt.feas_history))
+    entry 2k of the x history."""
+    if hasattr(opt, "history"):  # ALBCD keeps its histories in a dict, ALC and ADMM in attributes
+        res, feas, xs = opt.history["optimality"], opt.history["feasibility"], opt.history["x"]
+    else:
+        res, feas, xs = opt.opt_history, opt.feas_history, opt.x_history
+    return dict(opt_history=np.array(res), feas_history=np.array(feas),
+                error=C.design_error(xs[2::2]), success=opt.success, mu0=mu0, x=opt.x,
+                time=opt.tf, sweeps=len(feas))
 
 
 runs = {}
@@ -81,7 +85,7 @@ print()
 for name, r in runs.items():
     print(f"{name:6s}: {r['sweeps']:3d} sweeps, reports {'success' if r['success'] else 'failure'}, "
           f"optimality residual {r['opt_history'][-1]:.2e}, feasibility {r['feas_history'][-1]:.2e}, "
-          f"relative error {r['error'][-1]:.2e}")
+          f"||x - x*|| {r['error'][-1]:.2e}")
 
 np.savez(os.path.join(HERE, "cessna_comparison.npz"),
          **{f"{name}_{key}": value for name, r in runs.items() for key, value in r.items()})

@@ -69,7 +69,7 @@ def run_albcd():
     blocks = [BlockSubproblem(slice(0, 2), [-np.inf, 0.0], [np.inf, np.inf], log),  # x1 and s >= 0
               BlockSubproblem(slice(2, 3), [-np.inf], [np.inf], log)]  # x2
     opt = ALBCD(blocks, x0=np.array([-0.5, 0.0, 1.0]), mu0=np.array([0.5]), feas_tol=1e-3,
-                opt_tol=[1e-2, 1e-4], max_inner_iter=100, verbose=False)
+                opt_tol=1e-4, max_inner_iter=100, verbose=False)
     opt.solve()
     return opt, log
 
@@ -91,8 +91,8 @@ def make_video(opt, log, filename, ffmpeg):
     mpl.rcParams['animation.ffmpeg_path'] = ffmpeg
     fps = 25
     max_size_bytes = 750_000
-    xy = np.array(opt.x_history)[:, [0, 2]]  # (x1, x2) before the first solve and after each solve
-    feas, res = np.array(opt.feas_history), np.array(opt.opt_history)
+    xy = np.array(opt.history["x"])[:, [0, 2]]  # (x1, x2) before the first solve and after each solve
+    feas, res = np.array(opt.history["feasibility"]), np.array(opt.history["optimality"])
     n_sweeps = len(feas)
     bounds = [i // 2 + 1 for i in range(1, len(log)) if log[i][1:] != log[i - 1][1:]]  # sweeps starting an outer iteration
 
@@ -144,7 +144,7 @@ def make_video(opt, log, filename, ffmpeg):
     # right plots: feasibility and optimality history, revealed one sweep at a time
     lines, live_values = [], []
     plot_data = ((ax_feas, feas, opt.feas_tol, 'Feasibility', 'tab:purple', 'feas tol'),
-                 (ax_opt, res, opt.opt_tol[-1], 'Optimality', 'tab:orange', 'opt tol'))
+                 (ax_opt, res, opt.opt_tol, 'Optimality', 'tab:orange', 'opt tol'))
     for a, data, tol, label, color, tol_label in plot_data:
         a.set(yscale='log', xlim=(0.5, n_sweeps + 0.5), ylabel=label,
               ylim=(10**np.floor(np.log10(min(data.min(), tol))) / 2, 10**np.ceil(np.log10(data.max())) * 2))

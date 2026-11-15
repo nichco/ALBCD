@@ -24,7 +24,7 @@ beta = inf recovers ALBCD2 exactly.
 """
 
 import numpy as np
-from .albcd2 import ALBCD2
+from .albcd import ALBCD as ALBCD2
 
 
 class BalancedALBCD2(ALBCD2):

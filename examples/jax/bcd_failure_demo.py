@@ -14,18 +14,18 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def run(name):
-    """Run an example script without showing its own plot, and return its ALBCD instance."""
+    """Run an example script without showing its own plot, and return its BCD iterates."""
     show, plt.show = plt.show, lambda *args, **kwargs: None
     try:
-        opt = runpy.run_path(os.path.join(HERE, name), run_name="__main__")["opt"]
+        history = runpy.run_path(os.path.join(HERE, name), run_name="__main__")["history"]
     finally:
         plt.show = show
         plt.close("all")
-    return opt
+    return history
 
 
-global_failure = np.array(run("quadratic_global_failure.py").x_history)  # (x1, x2)
-no_feasible = np.array(run("no_feasible_solution.py").x_history)  # (x1, x2)
+global_failure = np.array(run("quadratic_global_failure.py"))  # (x1, x2)
+no_feasible = np.array(run("no_feasible_solution.py"))  # (x1, x2)
 
 plt.rcParams.update({"font.family": "STIXGeneral", "mathtext.fontset": "stix", "font.size": 10,
                      "xtick.labelsize": 10, "ytick.labelsize": 10, "legend.fontsize": 10,

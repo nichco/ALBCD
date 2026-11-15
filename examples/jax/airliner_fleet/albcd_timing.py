@@ -119,7 +119,7 @@ class FlightSubproblem(Subproblem):
 
 if __name__ == "__main__":
     N = int(sys.argv[1]) if len(sys.argv) > 1 else 8
-    # final-phase optimality tolerance (ALBCD's own block residual); airliner_fleet.py uses 1e-4
+    # optimality tolerance (ALBCD's own block residual); airliner_fleet.py uses 1e-4
     final_opt_tol = float(sys.argv[2]) if len(sys.argv) > 2 else 1e-6
     ranges, masses, flights, T_budget = make_fleet(N)
     x0 = np.concatenate([initial_guess(fl) for fl in flights])
@@ -135,24 +135,24 @@ if __name__ == "__main__":
                 rho=2.0,
                 tau=0.5,
                 feas_tol=1e-4,
-                opt_tol=[1e-2, final_opt_tol],
+                opt_tol=final_opt_tol,
                 max_y=1e6,
                 max_outer_iter=100,
                 max_inner_iter=20)
-    opt.x_history = TimedList(opt.x_history)  # x0, then x after every block solve
-    opt.opt_history = TimedList()             # ALBCD's optimality residual after every sweep
+    opt.history["x"] = TimedList(opt.history["x"])  # x0, then x after every block solve
+    opt.history["optimality"] = TimedList()             # ALBCD's optimality residual after every sweep
 
     t_start = time.perf_counter()
-    opt.x_history.times[0] = t_start
+    opt.history["x"].times[0] = t_start
     opt.solve()
 
-    time_x = np.array(opt.x_history.times) - t_start
-    time_sweep = np.array(opt.opt_history.times) - t_start
-    xs = np.array(opt.x_history)
+    time_x = np.array(opt.history["x"].times) - t_start
+    time_sweep = np.array(opt.history["optimality"].times) - t_start
+    xs = np.array(opt.history["x"])
 
     blocks = opt.x.reshape(N, nvar)
     fuel_kg = np.array([1e3 * float(outputs_fn(jnp.asarray(v), fl)[-1]) for v, fl in zip(blocks, flights)])
-    print(f"{len(opt.feas_history)} sweeps, wall time {opt.tf:.1f} s, success {opt.success}, "
+    print(f"{len(opt.history["feasibility"])} sweeps, wall time {opt.tf:.1f} s, success {opt.success}, "
           f"fleet fuel {fuel_kg.sum():.1f} kg, cost index {opt.y[0]:.4f}", flush=True)
 
     # save the run before the (slower) KKT post-processing, then again with the KKT measure.
@@ -160,8 +160,8 @@ if __name__ == "__main__":
     # feas_native: one entry per sweep
     path = os.path.join(HERE, f"albcd_timing_history_N{N}.npz")
     previous = load_previous_kkt(path)  # loaded before the save below overwrites it
-    run = dict(time=time_x, x=xs, time_sweep=time_sweep, opt_native=np.array(opt.opt_history),
-               feas_native=np.array(opt.feas_history), fuel=fuel_kg, cost_index=opt.y[0],
+    run = dict(time=time_x, x=xs, time_sweep=time_sweep, opt_native=np.array(opt.history["optimality"]),
+               feas_native=np.array(opt.history["feasibility"]), fuel=fuel_kg, cost_index=opt.y[0],
                success=opt.success, opt_tol=opt.opt_tol, feas_tol=opt.feas_tol)
     np.savez(path, **run)
 

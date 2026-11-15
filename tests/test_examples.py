@@ -43,23 +43,31 @@ def test_example(name, backend, folder):
     if "cvxopt" in name:
         pytest.importorskip("cvxopt")
 
-    opt = runpy.run_path(str(EXAMPLES / folder / name))["opt"]
+    script = runpy.run_path(str(EXAMPLES / folder / name))
     plt.close("all")
 
-    assert opt.success
-    np.testing.assert_allclose(opt.x, SOLUTIONS[name], atol=5e-3)
+    if "opt" in script:  # an ALBCD example
+        opt = script["opt"]
+        assert opt.success
+        x = opt.x
+    else:  # a plain BCD example: history holds x0, then x after each solve of a one-variable block
+        history = script["history"]
+        max_sweeps = script["bcd"].__defaults__[-1]
+        assert len(history) - 1 < history.shape[1] * max_sweeps  # stopped on its tolerance
+        x = history[-1]
+    np.testing.assert_allclose(x, SOLUTIONS[name], atol=5e-3)
 
 
 @pytest.mark.filterwarnings("ignore:FigureCanvasAgg is non-interactive")  # plt.show() under Agg
 def test_powell():
     """Unconstrained BCD cycles on Powell's example instead of converging."""
-    opt = runpy.run_path(str(EXAMPLES / "powell.py"))["opt"]
+    script = runpy.run_path(str(EXAMPLES / "powell.py"))
     plt.close("all")
 
-    assert not opt.success
-    assert len(opt.x_history) == 1 + 6 * 3  # max_inner_iter = 6 sweeps over 3 blocks
-    np.testing.assert_allclose(np.abs(opt.x), 1, atol=1e-3)  # near a vertex of [-1, 1]^3 ...
-    assert opt.opt_history[-1] > 1.9  # ... where the gradient does not vanish
+    history = script["history"]
+    assert len(history) == 1 + 6 * 3  # all max_sweeps = 6 sweeps over 3 blocks, so it never converged
+    np.testing.assert_allclose(np.abs(history[-1]), 1, atol=1e-3)  # near a vertex of [-1, 1]^3 ...
+    assert np.max(np.abs(script["gradient"](history[-1]))) > 1.9  # ... where the gradient does not vanish
 
 
 def test_circle_animation():
@@ -70,4 +78,4 @@ def test_circle_animation():
 
     assert opt.success
     np.testing.assert_allclose(opt.x, [R, 0, R], atol=5e-3)
-    assert len(log) == len(opt.x_history) - 1  # one (block, y, mu) entry per block solve
+    assert len(log) == len(opt.history["x"]) - 1  # one (block, y, mu) entry per block solve

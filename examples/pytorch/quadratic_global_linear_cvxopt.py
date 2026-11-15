@@ -173,7 +173,7 @@ opt = ALBCD(subproblems=[Subproblem1(index=slice(0, 2)), # owns x1 and s
             rho=1.2,
             tau=0.5,
             feas_tol=1e-3,
-            opt_tol=[1e-2, 1e-4],
+            opt_tol=1e-4,
             max_y=1e6,
             max_outer_iter=100,
             max_inner_iter=100)
@@ -181,7 +181,7 @@ opt = ALBCD(subproblems=[Subproblem1(index=slice(0, 2)), # owns x1 and s
 opt.solve()
 
 
-history = np.array(opt.x_history)
+history = np.array(opt.history["x"])
 x1_history = history[:, 0]
 s_history = history[:, 1]
 x2_history = history[:, 2]

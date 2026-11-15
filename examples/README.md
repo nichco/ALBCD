@@ -24,8 +24,6 @@ and run any example directly, e.g. `python examples/pytorch/rosenbrock_consensus
 | `proximal_rosenbrock_consensus.py` | Same problem as `rosenbrock_consensus.py`, with a proximal term added to each block's subproblem for stabilization. |
 | `2d_rosenbrock.py` | Unconstrained two-dimensional Rosenbrock function with one variable per block: plain block coordinate descent zigzags along the valley to the minimum. |
 | `wing_design.py` | Unconstrained two-variable wing design from [Engineering Design Optimization](https://mdobook.github.io/): minimize the power required over span and chord, one variable per block, with bounds; compared against a monolithic SLSQP solve. |
-| `scalable_test_problem.py` | Monolithic reference for `scalable_test_problem_albcd.py`: `N` Rosenbrock subproblems sharing `n0` global variables, each with `ni` local variables and a sphere constraint, plus one global linear inequality, solved with a single SLSQP. |
-| `scalable_test_problem_albcd.py` | ALBCD version of `scalable_test_problem.py`, with adjustable sizes `N`, `n0` and `ni`: each block owns a local copy of the global variables, kept in agreement by spanning-tree (chain) consensus constraints, and handles its sphere constraint locally. The global inequality enters the augmented Lagrangian through a slack variable. |
 
 The plain BCD examples (`quadratic_global_failure.py`, `no_feasible_solution.py`,
 `2d_rosenbrock.py`, `wing_design.py` and `powell.py`) do not use ALBCD: each writes
@@ -35,14 +33,14 @@ out a short block coordinate descent loop, so it runs on its own.
 coordinate descent cycles around six vertices of a cube instead of converging. Each block's minimizer and residual
 are explicit, so it needs only NumPy and matplotlib.
 
-[circle_animation.py](circle_animation.py) renders a video of ALBCD solving the
+[albcd_circle_animation.py](albcd_circle_animation.py) renders a video of ALBCD solving the
 `quadratic_global_circle.py` problem: the axis-aligned block updates on contours of the
 augmented Lagrangian, the landscape morphing as the multiplier and penalty are updated
 between outer iterations, and the feasibility and optimality histories. Its gradients are
 written out by hand, so it needs modopt, matplotlib and ffmpeg, but no autodiff library.
 
 Two larger wing design examples are in
-[jax/aerostruct/](jax/aerostruct/README.md) and [pytorch/aerostruct/](pytorch/aerostruct/README.md)
+[jax/aerostruct/](jax/aerostruct/README.md)
 (aerostructural design), in [jax/cessna/](jax/cessna/README.md) and
 [pytorch/cessna/](pytorch/cessna/README.md) (aerostructural design of a Cessna 182-like
 wing with stress and minimum-gauge constraints) and in [jax/uCRM/](jax/uCRM/README.md) and

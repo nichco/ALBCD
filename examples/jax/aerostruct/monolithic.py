@@ -16,7 +16,7 @@ import matplotlib.pyplot as plt
 import warnings
 warnings.filterwarnings("ignore")
 
-from beam_jax import Beam, CSTube
+from jframe import Beam, CSTube, Frame
 from models import (aero_model, structures_model, twist_cp0, thickness_cp0, num_cp_twist, num_cp_thickness,
                     bspline_twist, bspline_thickness, min_gauge, r, tip_disp_target, y, b, v_inf, rho_atm,
                     mesh0_jnp, vlm_geom, vlm_aero, solve_aero, struct_mesh, num_nodes, fixed_nodes,
@@ -87,7 +87,7 @@ F = F.at[:, 0].set(aero_loads[:num_nodes] * load_factor * safety_factor)
 F = F.at[:, 2].set(aero_loads[num_nodes:] * load_factor * safety_factor)
 beam = Beam(mesh=struct_mesh, E=E, G=G, rho=rho_mat,
             cs=CSTube(radius=r, thickness=thickness), F=F, fixed_nodes=fixed_nodes)
-u = beam.solve()
+u = Frame([beam]).solve()[0]
 print('Mass (kg): ', float(beam.mass))
 
 

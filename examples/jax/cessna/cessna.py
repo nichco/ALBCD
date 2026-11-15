@@ -254,17 +254,17 @@ def make_albcd(rho=1.2, mu0=10.0, max_inner_iter=12, max_outer_iter=40, tau=0.0)
                  rho=rho,
                  tau=0.5,
                  feas_tol=3e-4,
-                 opt_tol=[1e-1, 1e-3],
+                 opt_tol=1e-3,
                  max_outer_iter=max_outer_iter,
                  max_inner_iter=max_inner_iter)
 
 
 def design_error(x_history):
-    """Relative error in [twist_cp, thickness_cp] against the monolithic solution, for each x in x_history."""
+    """||x - x*|| in [twist_cp, thickness_cp] against the monolithic solution, for each x in x_history."""
     solution = np.load(os.path.join(HERE, 'monolithic_solution.npz'))
     x_star = np.concatenate([solution['twist_cp'], solution['thickness_cp']])
     history = np.array([np.concatenate([h[TWIST_SLICE], h[THICKNESS_SLICE]]) for h in x_history])
-    return np.linalg.norm(history - x_star, axis=1) / np.linalg.norm(x_star)
+    return np.linalg.norm(history - x_star, axis=1)  # ||x - x*||
 
 
 if __name__ == "__main__":
@@ -285,16 +285,16 @@ if __name__ == "__main__":
 
     # compare with the monolithic solution (the same problem solved with one SLSQP)
     solution = np.load(os.path.join(HERE, 'monolithic_solution.npz'))
-    error = design_error(opt.x_history)
+    error = design_error(opt.history["x"])
 
     print('CD: ', opt.data['CD'])
     print('CD (monolithic): ', float(solution['CD']))
-    print('Relative error: ', error[-1])
+    print('||x - x*||: ', error[-1])
 
     # convergence data, for fig_convergence.py. opt_history and feas_history have one entry per sweep;
     # error has one per subproblem solve, and a leading entry for x0
     np.savez(os.path.join(HERE, 'cessna_albcd.npz'),
-             opt_history=opt.opt_history, feas_history=opt.feas_history, error=error)
+             opt_history=opt.history["optimality"], feas_history=opt.history["feasibility"], error=error)
 
 
     twist = np.array(bspline_twist @ twist_cp)
@@ -311,22 +311,22 @@ if __name__ == "__main__":
 
 
     # optimality and feasibility after every sweep, and the error in the design after every block solve
-    iterations = np.arange(1, len(opt.feas_history) + 1)
+    iterations = np.arange(1, len(opt.history["feasibility"]) + 1)
 
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(8, 2.5))
-    ax1.semilogy(iterations, opt.opt_history, color='tab:blue', linewidth=2)
+    ax1.semilogy(iterations, opt.history["optimality"], color='tab:blue', linewidth=2)
     ax1.set_xlabel('Iteration')
     ax1.set_ylabel('Optimality')
     ax1.grid(color='lavender', alpha=0.5, axis='y')
 
-    ax2.semilogy(iterations, opt.feas_history, color='tab:orange', linewidth=2)
+    ax2.semilogy(iterations, opt.history["feasibility"], color='tab:orange', linewidth=2)
     ax2.set_xlabel('Iteration')
     ax2.set_ylabel('Feasibility')
     ax2.grid(color='lavender', alpha=0.5, axis='y')
 
-    ax3.semilogy(error, linewidth=2, color='tab:red')
+    ax3.plot(np.log10(error), linewidth=2, color='tab:red')
     ax3.set_xlabel('Iteration')
-    ax3.set_ylabel('Relative error')
+    ax3.set_ylabel(r"$\log_{10}\Vert x - x^*\Vert$")
     ax3.grid(color='lavender', alpha=0.5, axis='y')
 
     plt.tight_layout()

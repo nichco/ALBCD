@@ -24,9 +24,9 @@ def run(name):
     return opt
 
 
-consensus_linear = np.array(run("quadratic_consensus_linear.py").x_history)  # (x1_1, x2_1, x1_2, x2_2)
-consensus_circle = np.array(run("quadratic_consensus_circle.py").x_history)  # (x1_1, x2_1, x1_2, x2_2)
-global_linear = np.array(run("quadratic_global_linear.py").x_history)  # (x1, s, x2)
+consensus_linear = np.array(run("quadratic_consensus_linear.py").history["x"])  # (x1_1, x2_1, x1_2, x2_2)
+consensus_circle = np.array(run("quadratic_consensus_circle.py").history["x"])  # (x1_1, x2_1, x1_2, x2_2)
+global_linear = np.array(run("quadratic_global_linear.py").history["x"])  # (x1, s, x2)
 
 plt.rcParams.update({"font.family": "STIXGeneral", "mathtext.fontset": "stix", "font.size": 10,
                      "xtick.labelsize": 10, "ytick.labelsize": 10, "legend.fontsize": 10,
@@ -95,4 +95,5 @@ for ax in axes:
 
 fig.tight_layout(w_pad=1.0)
 fig.savefig(os.path.join(HERE, "fig_albcd_demo.pdf"), bbox_inches="tight", pad_inches=0.02)
+fig.savefig(os.path.join(HERE, "fig_albcd_demo.png"), dpi=200, bbox_inches="tight", pad_inches=0.02)  # for the README
 plt.show()

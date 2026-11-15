@@ -26,10 +26,11 @@ for k, mu0 in enumerate(d["mu0"]):
                  mew=0.8, markevery=(0.02 * k, 0.1))  # every 10% of the axes diagonal, staggered by line
     opt.plot(sweeps, d["opt_history"][k], label=rf"$\mu_{{init}} = {mu0:.3g}$", **style)
     feas.plot(sweeps, d["feas_history"][k], **style)
-    err.plot(np.arange(len(d["error"][k])) / n, d["error"][k], **style)
+    err.plot(np.arange(len(d["error"][k])) / n, np.log10(d["error"][k]), **style)
 
-for a, label in ((opt, "Optimality residual"), (feas, "Feasibility"), (err, "Relative error in $x$")):
-    a.set_yscale("log")
+for a, label in ((opt, "Optimality residual"), (feas, "Feasibility"), (err, r"$\log_{10}\Vert x - x^*\Vert$")):
+    if a is not err:  # err holds log10 values
+        a.set_yscale("log")
     a.xaxis.set_minor_locator(NullLocator())
     a.yaxis.set_minor_locator(NullLocator())
     a.set_ylabel(label)

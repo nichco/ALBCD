@@ -11,7 +11,7 @@ burn, L=W trim) layered on top of it.
 Copied from the aerodynamics-relevant subset of ``openaerostruct_jax``
 (dropping everything structural: no beam FEM, no aerostructural coupling),
 so this package has no dependency on it or on OpenMDAO/OpenAeroStruct at
-runtime. The JAX counterpart of ``examples/pytorch/aerostruct/vlm_torch``;
+runtime. The JAX counterpart of ``examples/pytorch/cessna/vlm_torch``;
 the two compute the same quantities in the same order.
 """
 import jax

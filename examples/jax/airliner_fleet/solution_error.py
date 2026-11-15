@@ -1,8 +1,8 @@
 """Subproblem solves ALBCD needs to reach each solution error, on the airliner allocation problem.
 
 Runs airliner_fleet.py with ALBCD replaced by ErrorTerminatedALBCD, which stops as soon as the
-relative error in x (as defined in airliner_fleet.py: the x_scaler-scaled 2-norm, relative to
-the monolithic solution) is at most the tightest of TARGETS. ALBCD is deterministic, so a single
+error in x (as defined in airliner_fleet.py: ||x - x*|| in the x_scaler-scaled 2-norm, with x* the
+monolithic solution) is at most the tightest of TARGETS. ALBCD is deterministic, so a single
 run gives every looser target too: the solves to reach it are those at which the run first
 crossed it, the same count a run stopped at that target would report. The example is stopped
 right after its solve, so its own output files (fleet_albcd_N*.npz, the gifs) are not written.
@@ -26,7 +26,7 @@ import numpy as np
 import albcd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TARGETS = np.array([1e-1, 3e-2, 1e-2, 3e-3, 1e-3, 3e-4, 1e-4]) # relative errors in x to solve to
+TARGETS = np.array([3e0, 1e0, 3e-1, 1e-1, 3e-2, 1e-2, 3e-3]) # errors ||x - x*|| to solve to
 SIZES = [2, 3, 4, 5, 6, 7, 8, 9, 10] # numbers of flights, when none are passed
 
 
@@ -45,7 +45,7 @@ class ErrorTerminatedALBCD(albcd.ALBCD):
     stops before reaching is recorded as not reached.
 
     The airliner example's subproblems are set up for x_scaler, so the error is measured as in
-    airliner_fleet.py: ||(x - x*) * scale|| / ||x* * scale||, with x* the monolithic solution.
+    airliner_fleet.py: ||(x - x*) * scale||, with x* the monolithic solution.
     """
 
     def __init__(self, *args, targets, exact, scale, **kwargs):
@@ -61,7 +61,7 @@ class ErrorTerminatedALBCD(albcd.ALBCD):
             sub.solve = self.checked(sub.solve)
 
     def error(self, x):
-        return float(np.linalg.norm(x * self.scale - self.exact) / np.linalg.norm(self.exact))
+        return float(np.linalg.norm(x * self.scale - self.exact))
 
     def checked(self, solve):
         """solve(), then record which targets the x it returns reaches, and stop at the tightest."""
@@ -131,12 +131,11 @@ def plot():
     fig, ax = plt.subplots(figsize=(4.5, 3))
     for (N, d), c in zip(cases, colors):
         ok = d["reached"]
-        ax.plot(d["target"][ok], d["solves"][ok], "o-", color=c, lw=1.2, ms=4, mfc="w", mew=1.0, label=f"$N = {N}$")
-    ax.set_xscale("log")
+        ax.plot(np.log10(d["target"][ok]), d["solves"][ok], "o-", color=c, lw=1.2, ms=4, mfc="w", mew=1.0, label=f"$N = {N}$")
     ax.invert_xaxis() # tighter errors to the right
     ax.xaxis.set_minor_locator(NullLocator())
     ax.set_ylim(bottom=0)
-    ax.set_xlabel("Relative error in $x$")
+    ax.set_xlabel(r"$\log_{10}\Vert x - x^*\Vert$")
     ax.set_ylabel("Subproblem solves")
     handles, labels = ax.get_legend_handles_labels()
     ax.legend(handles[::-1], labels[::-1], loc="upper left", bbox_to_anchor=(1.01, 1), frameon=False)
