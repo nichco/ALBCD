@@ -1,97 +1,12 @@
-# Distribution Statement A. Approved for public release: distribution is unlimited. Approved AFRL-2026-1671 28-09-2026.
-
 import time
 from typing import Optional, Sequence, Union
 import numpy as np
+from scipy.optimize import BFGS
+from types import SimpleNamespace
+from collections import defaultdict
 
+class ALBCD2():
 
-class ALBCD():
-    """Augmented Lagrangian block coordinate descent (ALBCD).
-
-    Solves ``min f(x)  s.t.  phi(x) = 0``, where ``x`` is partitioned into
-    blocks, each owned by a :class:`~albcd.Subproblem`, and ``phi`` are the
-    coupling constraints between blocks. Constraints local to one block are
-    handled inside that block's subproblem; coupling inequalities can be
-    written as equalities with slack variables.
-
-    Each outer iteration approximately minimizes the augmented Lagrangian
-
-        L(x; y, mu) = f(x) + y^T phi(x) + 1/2 sum_i mu_i phi_i(x)^2
-
-    by sweeping over the subproblems (block coordinate descent) until every
-    subproblem residual is at most ``opt_tol``. It then updates the multipliers,
-    ``y <- y + mu * phi``, and multiplies ``mu_i`` by ``rho`` wherever
-    ``|phi_i|`` did not drop below ``tau`` times its previous value. The solve
-    stops once ``max|phi| <= feas_tol`` in the final phase.
-
-    With ``unconstrained=True`` there are no coupling constraints: ``y``,
-    ``mu`` and ``phi`` are empty, the augmented Lagrangian is just ``f``, and
-    the solve reduces to block coordinate descent. Each ``opt_tol`` phase is
-    one outer iteration of at most ``max_inner_iter`` sweeps, until every
-    subproblem residual is at most that phase's tolerance. Constraints local
-    to one block are still allowed.
-
-    Parameters
-    ----------
-    subproblems : list of Subproblem
-        One subproblem per block, solved in list order during each sweep.
-    x0 : array_like
-        Initial design vector.
-    mu0 : array_like, optional
-        Initial penalty parameters, one per coupling constraint; sets the
-        length of ``y`` and ``phi``. Required unless ``unconstrained=True``,
-        in which case it must be omitted.
-    data0 : dict, optional
-        Initial values of any quantities the subproblems share, keyed by name.
-    max_mu : float
-        Upper bound on each penalty parameter.
-    rho : float
-        Penalty growth factor.
-    tau : float
-        Required reduction factor of each constraint violation per outer iteration.
-    feas_tol : float
-        Feasibility tolerance on ``max|phi|``.
-    opt_tol : float or sequence of float
-        Inner loop optimality tolerance for each phase; its length sets the
-        number of phases (e.g. a loose tolerance first, then a tight one).
-    max_outer_iter : int
-        Maximum number of outer iterations, counted across all phases.
-    max_inner_iter : int
-        Maximum number of sweeps per outer iteration.
-    max_y : float
-        Bound on the magnitude of each Lagrange multiplier.
-    verbose : bool
-        Print per-iteration diagnostics.
-    unconstrained : bool
-        The problem has no coupling constraints, so ``mu0`` is omitted and no
-        subproblem sets the ``"phi"`` output. Only block coordinate
-        descent runs, once per ``opt_tol`` phase (``max_outer_iter`` still
-        bounds the number of phases); ``max_mu``, ``rho``, ``tau``,
-        ``feas_tol`` and ``max_y`` are unused.
-
-    Attributes
-    ----------
-    x, y, mu, phi : ndarray
-        Design vector, multipliers, penalty parameters and coupling
-        constraints; the solution once :meth:`solve` returns. ``y``, ``mu``
-        and ``phi`` are empty when unconstrained.
-    success : bool
-        True if the solve ended feasible (``max|phi| <= feas_tol``) and
-        optimal (the last inner loop reached the final ``opt_tol``); when
-        unconstrained, only optimal.
-    data : dict
-        Quantities shared between subproblems, passed to each solve() and gradient().
-    x_history : list of ndarray
-        ``x0`` followed by ``x`` after every subproblem solve.
-    feas_history : list of float
-        ``max|phi|`` after every sweep (0 when unconstrained).
-    opt_history : list of float
-        Max-norm KKT stationarity residual over all blocks after every sweep,
-        the value the inner loop compares with ``opt_tol``. Aligned with
-        ``feas_history``: entry ``i`` of both describes the ``i``-th sweep.
-    tf : float
-        Wall-clock time of :meth:`solve` in seconds.
-    """
 
     def __init__(self,
                  subproblems: Sequence,
@@ -102,122 +17,328 @@ class ALBCD():
                  rho: float = 1.2,
                  tau: float = 0.5,
                  feas_tol: float = 1e-3,
-                 opt_tol: Union[float, Sequence[float]] = (1e-2, 1e-5),
+                 opt_tol: float = 1e-4,
                  max_outer_iter: int = 100,
                  max_inner_iter: int = 10,
                  max_y: float = 1e6,
+                 kappa: float = 10.0,
                  verbose: bool = True,
-                 unconstrained: bool = False,
                  ):
 
         self.subproblems = subproblems
         self.x = np.array(x0, dtype=float) # copy, so the caller's x0 is never modified
         self.data = {} if data0 is None else dict(data0) # other quantities shared between subproblems; never holds x, y, mu or phi
         self.tf = None
-        self.unconstrained = unconstrained
 
-        # mu0 has one entry per coupling constraint, so it's needed exactly when there are some
-        if unconstrained and mu0 is not None:
-            raise ValueError('mu0 must be omitted when unconstrained=True')
-        if not unconstrained and (mu0 is None or np.size(mu0) == 0):
-            raise ValueError('mu0 needs one entry per coupling constraint; set unconstrained=True if there are none')
-
-        # force float dtype; an integer-dtype mu would otherwise truncate penalty growth.
-        # Unconstrained, mu (and with it y and phi) is empty
-        self.mu = np.zeros(0) if unconstrained else np.asarray(mu0, dtype=float) # penalty parameter(s)
-
+        self.mu = np.asarray(mu0, dtype=float) # penalty parameter(s)
         self.max_mu = max_mu
         self.rho = rho
         self.tau = tau
         self.feas_tol = feas_tol
-
-        # one optimality tolerance per phase; a scalar gives a single phase
-        self.opt_tol = np.atleast_1d(np.asarray(opt_tol, dtype=float))
-        if self.opt_tol.ndim != 1 or self.opt_tol.size == 0:
-            raise ValueError('opt_tol must be a float or a 1D list/array of floats')
+        self.opt_tol = opt_tol
+        self.success = False
 
         self.max_outer_iter = max_outer_iter
         self.max_inner_iter = max_inner_iter
         self.max_y = max_y
+        self.kappa = kappa
         self.verbose = verbose
-        self.x_history = [self.x.copy()]
-        self.feas_history = [] # feasibility (max constraint violation) after each sweep
-        self.opt_history = []  # optimality (max-norm KKT residual) after each sweep
         self.y = np.zeros_like(self.mu) # Lagrange multipliers, one per coupling constraint
-        self.phi = np.zeros(0) if unconstrained else None # coupling constraints at the current x, from the latest subproblem solve
-        self.success = False # set by solve()
+        self.phi = None # coupling constraints at the current x, from the latest subproblem solve
+        self.history = defaultdict(list)
 
+        self.history["x"].append(self.x.copy())
+        # self.history["mu"].append(self.mu.copy())
+        # self.history["y"].append(self.y.copy())
+        
+        # damped-BFGS approximation of the Hessian of f + y^T phi w.r.t. all variables
+        # self.B = BFGS(exception_strategy="damp_update", init_scale="auto")
+        # self.B.initialize(self.x.size, "hess")
 
-    def _update_mu(self, c_new, c_old) -> None:
-        """Increase the penalty parameter of each scalar constraint if
-         it is infeasible and its feasibility is not decreasing fast enough."""
-        # vectorized over all constraints instead of a per-index Python loop
-        f_new = np.abs(c_new)
-        f_old = np.abs(c_old)
-        grow = (f_new > self.tau * f_old) & (f_new > self.feas_tol)
-        self.mu[grow] = np.minimum(self.rho * self.mu[grow], self.max_mu)
+    def _log(self, msg: str) -> None:
+        if self.verbose: print(msg)
 
-        return None
+    def _update_mu(self, mu, phi_new, phi_old) -> None:
+        # increase the penalty parameter of each scalar constraint if
+        # it is infeasible and its feasibility is not decreasing fast enough.
+        
+        grow = np.abs(phi_new) > np.maximum(self.tau * np.abs(phi_old), self.feas_tol)
+        mu_new = np.where(grow, self.rho * mu, mu)
 
+        return np.minimum(mu_new, self.max_mu)
 
-    def solve(self) -> "ALBCD":
+    def _update_y(self, y, mu, phi) -> None:
+
+        y_new = y + mu * phi
+        y_new = np.clip(y_new, -self.max_y, self.max_y)
+
+        return y_new
+
+    def _block_coordinate_descent(self, opt_tol):
+
+        for i in range(self.max_inner_iter):
+
+            for subproblem in self.subproblems:
+
+                outputs = {}
+                subproblem.solve(self.x, self.y, self.mu, self.data, outputs)
+                self.x = outputs.pop("x")
+                # phi at the new x; none when unconstrained. A missing or wrong-sized phi fails the reshape
+                self.phi = np.array(outputs.pop("phi", []), dtype=float).reshape(self.mu.shape)
+                self.data.update(outputs)  # any other output is shared through data
+
+                self.history["x"].append(self.x.copy())
+
+            optimality = max(np.linalg.norm(sp.gradient(self.x, self.y, self.mu, self.data), ord=np.inf)
+                                for sp in self.subproblems)
+            self.history["optimality"].append(optimality)
+
+            feas = np.max(np.abs(self.phi), initial=0.0)
+            self.history["feasibility"].append(feas)
+
+            # inexact inner loop: the tolerance is loose while feasibility is large
+            # and tightens to opt_tol as feasibility approaches feas_tol
+            tol = opt_tol * max(1.0, self.kappa * feas / self.feas_tol)
+
+            if optimality <= tol:
+                self._log(f"inner loop converged with optimality {optimality:.3e} (tolerance {tol:.3e}) in {i + 1} iterations")
+                break
+
+            # exact albcd
+            # if opt <= opt_tol:
+            #     self._log(f"inner loop converged with optimality {opt:.3e} in {i + 1} iterations")
+            #     break
+
+        else: self._log(f"inner loop failed with optimality {optimality:.3e} in {i + 1} iterations")
+
+        return optimality
+
+    def solve(self) -> "ALBCD2":
 
         t0 = time.perf_counter()
-        log = print if self.verbose else lambda *args: None
-        self.success = False
-        phi_old = np.full_like(self.mu, np.inf)  # no penalty parameter grows on the first outer iteration
+        feas_tol = self.feas_tol
+        opt_tol = self.opt_tol
+
+        phi_old = np.full_like(self.mu, np.inf)
+                
         k = 0
+        while k < self.max_outer_iter:
+            k += 1
+        
+            optimality = self._block_coordinate_descent(opt_tol)
+        
+            feas = np.max(np.abs(self.phi))
+        
+            # the inner tolerance can be looser than opt_tol, so stop only once the iterate is
+            # both feasible and optimal to the final tolerance; otherwise keep iterating
+            if feas <= feas_tol and optimality <= opt_tol:
+                self.success = True
+                break
 
-        for phase, opt_tol in enumerate(self.opt_tol, start=1):  # tolerance phases
+            # previous behavior: stop as soon as the iterate is feasible
+            # if feas <= feas_tol:
+            #     self.success = optimality <= opt_tol
+            #     break
 
-            # augmented Lagrangian outer loop
-            while k < self.max_outer_iter:
-                k += 1
-
-                # BCD inner loop
-                for j in range(1, self.max_inner_iter + 1):
-
-                    for sub in self.subproblems:
-
-                        outputs = {}
-                        sub.solve(self.x, self.y, self.mu, self.data, outputs)
-                        self.x = outputs.pop("x")
-                        # phi at the new x; none when unconstrained. A missing or wrong-sized phi fails the reshape
-                        self.phi = np.array(outputs.pop("phi", []), dtype=float).reshape(self.mu.shape)
-                        self.data.update(outputs)  # any other output is shared through data
-
-                        self.x_history.append(self.x.copy())
-
-                    self.feas_history.append(float(np.max(np.abs(self.phi), initial=0.0)))
-
-                    res = max(np.linalg.norm(sub.gradient(self.x, self.y, self.mu, self.data), ord=np.inf) for sub in self.subproblems)
-                    self.opt_history.append(res)
-
-                    log(f'outer {k:3d} | sweep {j:3d} | opt_res {res:.3e}')
-
-                    if res <= opt_tol: break
-
-
-                feas = np.max(np.abs(self.phi), initial=0.0)  # 0 when unconstrained
-
-                log(f'outer {k:3d} | feas {feas:.3e} | max mu {np.max(self.mu, initial=0.0):.3e} | |y| {np.linalg.norm(self.y):.3e}')
-
-                # if feasible in the final phase: stop
-                # success also requires the last inner loop to have reached opt_tol
-                if feas <= self.feas_tol and phase == len(self.opt_tol):
-                    self.success = res <= opt_tol
-                    break
-
-                # update the multipliers and clip to the bounds
-                self.y = np.clip(self.y + self.mu * self.phi, -self.max_y, self.max_y)
-                self._update_mu(self.phi, phi_old)
-                phi_old = self.phi
-
-                if feas <= self.feas_tol:
-                    log(f'Phase {phase} complete, starting phase {phase + 1}')
-                    break  # next phase
+            self.y = self._update_y(self.y, self.mu, self.phi)
+            self.mu = self._update_mu(self.mu, self.phi, phi_old)
+            phi_old = self.phi
 
         self.tf = time.perf_counter() - t0
-        iters = f'{j} sweeps' if self.unconstrained else f'{k} outer iterations'
-        log(f"{'Converged' if self.success else 'Did not converge'} after {iters} ({self.tf:.2f} s)")
+        self._log(f"{'ALBCD converged' if self.success else 'ALBCD failed'} ({self.tf:.2f} s)")
+
         return self
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+if __name__ == "__main__":
+
+
+    import numpy as np
+    import modopt as mo
+    import jax
+    jax.config.update("jax_enable_x64", True)
+    import jax.numpy as jnp
+    import matplotlib.pyplot as plt
+    from subproblem import Subproblem
+    import warnings
+    warnings.filterwarnings("ignore")
+
+
+    class Subproblem1(Subproblem):
+
+        def objective(self, v, other, y, mu):
+            x1 = v[0]
+            s = v[1]
+            x2 = other[0]
+            obj = jnp.squeeze(x1**2 + x2**2 - 1.5 * x1 * x2)
+
+            g0 = -1 * (x1**2 + x2**2) + 0.5**2 + s
+
+            return obj + jnp.sum(y * g0) + 0.5 * jnp.sum(mu * g0**2)
+
+        def solve(self, x, y, mu, data, outputs) -> None:
+            v0 = np.asarray(self.decompose(x), dtype=float)
+            other = jnp.asarray(self.other(x))
+
+            xl = np.array([-np.inf, 0])
+            xu = np.array([np.inf, np.inf])
+
+            jax_obj = lambda v: self.objective(v, other, y, mu)
+
+            jaxprob = mo.JaxProblem(x0=v0, jax_obj=jax_obj, xl=xl, xu=xu)
+
+            optimizer = mo.SLSQP(jaxprob, solver_options={'maxiter': 100, 'ftol': 1e-8}, turn_off_outputs=True)
+            optimizer.solve()
+            # optimizer.print_results()
+            v_new = optimizer.results['x']
+
+            # No general (in)equality constraints at the block level -- only box
+            # bounds -- so cache the bounds for the projected-gradient stationarity
+            # check in residual() instead of constraint multipliers/Jacobian.
+            self._xl = xl
+            self._xu = xu
+
+            x_new = self.recompose(x, v_new)
+
+            # coupling constraint at the new x
+            x1, s, x2 = x_new
+            g0 = -1 * (x1**2 + x2**2) + 0.5**2 + s
+
+            outputs["x"] = x_new
+            outputs["phi"] = np.array([g0])
+
+        def gradient(self, x, y, mu, data) -> np.ndarray:
+
+            v = jnp.asarray(self.decompose(x))
+            other = jnp.asarray(self.other(x))
+            grad_f = jax.grad(self.objective)(v, other, y, mu)
+            
+            v = np.asarray(v)
+            grad_f = np.asarray(grad_f)
+            
+            # projected-gradient stationarity residual for box-constrained v:
+            # zero iff v satisfies the KKT conditions for xl <= v <= xu
+            proj = np.clip(v - grad_f, self._xl, self._xu)
+            grad = v - proj
+            return grad
+
+
+    class Subproblem2(Subproblem):
+
+        def objective(self, v, other, y, mu):
+            x2 = v[0]
+            x1, s = other[0], other[1]
+            obj = jnp.squeeze(x1**2 + x2**2 - 1.5 * x1 * x2)
+
+            g0 = -1 * (x1**2 + x2**2) + 0.5**2 + s
+            
+            return obj + jnp.sum(y * g0) + 0.5 * jnp.sum(mu * g0**2)
+
+        def solve(self, x, y, mu, data, outputs) -> None:
+            v0 = np.asarray(self.decompose(x), dtype=float)
+            other = jnp.asarray(self.other(x))
+
+            jax_obj = lambda v: self.objective(v, other, y, mu)
+
+            jaxprob = mo.JaxProblem(x0=v0, jax_obj=jax_obj)
+
+            optimizer = mo.SLSQP(jaxprob, solver_options={'maxiter': 100, 'ftol': 1e-8}, turn_off_outputs=True)
+            optimizer.solve()
+            # optimizer.print_results()
+            v_new = optimizer.results['x']
+
+            # No box bounds on this block either -- record unbounded limits so
+            # residual() can use the same projected-gradient check.
+            self._xl = np.full_like(v_new, -np.inf)
+            self._xu = np.full_like(v_new, np.inf)
+
+            x_new = self.recompose(x, v_new)
+
+            # coupling constraint at the new x
+            x1, s, x2 = x_new
+            g0 = -1 * (x1**2 + x2**2) + 0.5**2 + s
+
+            outputs["x"] = x_new
+            outputs["phi"] = np.array([g0])
+
+        def gradient(self, x, y, mu, data) -> np.ndarray:
+
+            v = jnp.asarray(self.decompose(x))
+            other = jnp.asarray(self.other(x))
+            grad_f = jax.grad(self.objective)(v, other, y, mu)
+            
+            v = np.asarray(v)
+            grad_f = np.asarray(grad_f)
+            
+            # projected-gradient stationarity residual for box-constrained v:
+            # zero iff v satisfies the KKT conditions for xl <= v <= xu
+            proj = np.clip(v - grad_f, self._xl, self._xu)
+            grad = v - proj
+            return grad
+
+
+    v_init = np.array([-0.5, 0.0, 1.0])
+
+    opt = ALBCD2(subproblems=[Subproblem1(index=slice(0, 2)), # owns x1 and s
+                            Subproblem2(index=slice(2, 3))], # owns x2
+                x0=np.array(v_init),
+                mu0=np.array([1.0]),
+                max_mu=1e3,
+                rho=1.2,
+                tau=0.5,
+                feas_tol=1e-3,
+                opt_tol=1e-4,
+                max_y=1e6,
+                max_outer_iter=100,
+                max_inner_iter=100)
+
+    opt.solve()
+
+
+    x_history = np.array(opt.history["x"])
+    x1_history = x_history[:, 0]
+    s_history = x_history[:, 1]
+    x2_history = x_history[:, 2]
+
+
+    plt.rcParams.update({'font.size': 14})
+
+    x = np.linspace(-1.5, 1.5, 200)
+    y = np.linspace(-1.5, 1.5, 200)
+    X, Y = np.meshgrid(x, y)
+    Z = X**2 + Y**2 - 1.5 * X * Y
+    levels = np.linspace(0, max(Z.flatten()), 30)
+    plt.contour(X, Y, Z, levels=levels, cmap='Blues_r', alpha=0.4, linewidths=0.5)
+    plt.contourf(X, Y, Z, levels=levels, cmap='Blues_r', alpha=0.5)
+
+    plt.plot(x1_history, x2_history, 's-', color='tab:orange', linewidth=2.5, markersize=6, zorder=10, mec='k', label=r'$(x, y)$')
+    plt.plot(x1_history[-1], x2_history[-1], 's', color='#D462AD', markersize=8, zorder=11, mec='k')
+    plt.xlim(-1.5, 1.5)
+    plt.ylim(-1.5, 1.5)
+    plt.xlabel('x')
+    plt.ylabel('y')
+
+    theta = np.linspace(0, 2*np.pi, 100)
+    circle_x = 0.5 * np.cos(theta)
+    circle_y = 0.5 * np.sin(theta)
+    plt.plot(circle_x, circle_y, '--', color='black', linewidth=2, alpha=0.5)
+    plt.fill(circle_x, circle_y, color='black', alpha=0.3)
+
+    ticks = [-1, 0, 1]
+    plt.xticks(ticks)
+    plt.yticks(ticks)
+    plt.gca().set_aspect('equal')
+    plt.show()
