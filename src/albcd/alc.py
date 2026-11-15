@@ -153,7 +153,7 @@ class ALC():
                     self.x_history.append(self.x.copy())
 
                 F = self.merit()
-                res = (max(sub.residual(self.x, self.y, self.mu, self.data) for sub in self.subproblems)
+                res = (max(np.linalg.norm(sub.gradient(self.x, self.y, self.mu, self.data), ord=np.inf) for sub in self.subproblems)
                        if self.record_residual else np.nan)
                 self.feas_history.append(float(np.max(np.abs(self.phi))))
                 self.opt_history.append(float(res))

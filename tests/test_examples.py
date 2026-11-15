@@ -66,7 +66,7 @@ def test_circle_animation():
     """The animation's solve (the video itself is not written) reaches the quick start solution."""
     pytest.importorskip("modopt")
     matplotlib.use("Agg")
-    opt, log = runpy.run_path(str(EXAMPLES / "circle_animation.py"))["run_albcd"]()
+    opt, log = runpy.run_path(str(EXAMPLES / "albcd_circle_animation.py"))["run_albcd"]()
 
     assert opt.success
     np.testing.assert_allclose(opt.x, [R, 0, R], atol=5e-3)

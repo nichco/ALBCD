@@ -36,6 +36,7 @@ class ALBCD2():
         self.tau = tau
         self.feas_tol = feas_tol
         self.opt_tol = opt_tol
+        self.success = False
 
         self.max_outer_iter = max_outer_iter
         self.max_inner_iter = max_inner_iter
@@ -45,7 +46,10 @@ class ALBCD2():
         self.y = np.zeros_like(self.mu) # Lagrange multipliers, one per coupling constraint
         self.phi = None # coupling constraints at the current x, from the latest subproblem solve
         self.history = defaultdict(list)
+
         self.history["x"].append(self.x.copy())
+        # self.history["mu"].append(self.mu.copy())
+        # self.history["y"].append(self.y.copy())
         
         # damped-BFGS approximation of the Hessian of f + y^T phi w.r.t. all variables
         # self.B = BFGS(exception_strategy="damp_update", init_scale="auto")
@@ -116,7 +120,6 @@ class ALBCD2():
         opt_tol = self.opt_tol
 
         phi_old = np.full_like(self.mu, np.inf)
-        success = False
                 
         k = 0
         while k < self.max_outer_iter:
@@ -129,12 +132,12 @@ class ALBCD2():
             # the inner tolerance can be looser than opt_tol, so stop only once the iterate is
             # both feasible and optimal to the final tolerance; otherwise keep iterating
             if feas <= feas_tol and optimality <= opt_tol:
-                success = True
+                self.success = True
                 break
 
             # previous behavior: stop as soon as the iterate is feasible
             # if feas <= feas_tol:
-            #     success = optimality <= opt_tol
+            #     self.success = optimality <= opt_tol
             #     break
 
             self.y = self._update_y(self.y, self.mu, self.phi)
@@ -142,7 +145,7 @@ class ALBCD2():
             phi_old = self.phi
 
         self.tf = time.perf_counter() - t0
-        self._log(f"{'ALBCD converged' if success else 'ALBCD failed'} ({self.tf:.2f} s)")
+        self._log(f"{'ALBCD converged' if self.success else 'ALBCD failed'} ({self.tf:.2f} s)")
 
         return self
 

@@ -1,79 +1,62 @@
 # Distribution Statement A. Approved for public release: distribution is unlimited. Approved AFRL-2026-1671 28-09-2026.
 
-"""Powell's example of block coordinate descent failing on an unconstrained problem:
+"""
+Powell's example of block coordinate descent failing on an unconstrained problem:
 
     min -x1 x2 - x2 x3 - x1 x3 + sum_i (max(xi - 1, 0)^2 + max(-xi - 1, 0)^2)
-
-Each of the three blocks owns one variable, and its minimizer and stationarity
-residual are both explicit, so no optimizer or automatic differentiation is needed.
-There are no coupling constraints, so ALBCD runs only its BCD inner loop
-(unconstrained=True). Started near the vertex (-1, 1, -1) of the cube [-1, 1]^3,
-exact block minimization never converges: the iterates cycle around six of the
-cube's vertices, where the gradient is not zero. See M. J. D. Powell, "On search
-directions for minimization algorithms", Mathematical Programming 4, 193-201 (1973).
-
-Run this file to solve the problem and plot the iterates.
 """
 
 import numpy as np
 import matplotlib.pyplot as plt
-from albcd import ALBCD, Subproblem
 
 
 def powell(x1, x2, x3):
-    """Powell's function, which is symmetric in its three arguments."""
     return (-x1*x2 - x2*x3 - x1*x3
             + np.maximum(x1 - 1, 0)**2 + np.maximum(-x1 - 1, 0)**2
             + np.maximum(x2 - 1, 0)**2 + np.maximum(-x2 - 1, 0)**2
             + np.maximum(x3 - 1, 0)**2 + np.maximum(-x3 - 1, 0)**2)
 
 
-class CoordinateSubproblem(Subproblem):
-    """Minimizes Powell's function over one variable with the other two fixed.
-
-    The function is symmetric, so one class serves all three blocks.
+def minimize_block(x, i):
     """
+    Minimizes Powell's function over x[i] with the other variables fixed.
+    """
+    s = np.sum(np.delete(x, i))
+    return np.sign(s) * (1 + abs(s) / 2)
 
-    def solve(self, x, y, mu, data, outputs) -> None:
-        # With the other two variables fixed and s their sum, the objective is -v s
-        # plus the penalties on v, up to a constant: linear in v on [-1, 1] and
-        # quadratic outside. It is minimized by v = 1 + s/2 for s > 0, by
-        # v = -1 + s/2 for s < 0, and by any v in [-1, 1] (here v = 0) for s = 0
-        s = np.sum(self.other(x))
-        v = np.sign(s) * (1 + abs(s) / 2)
 
-        outputs["x"] = self.recompose(x, v)
+def gradient(x):
+    """
+    Gradient of Powell's function.
+    """
+    s = np.sum(x) - x
+    return -s + 2 * np.maximum(x - 1, 0) - 2 * np.maximum(-x - 1, 0)
 
-    def residual(self, x, y, mu, data) -> float:
 
-        v = self.decompose(x)[0]
-        s = np.sum(self.other(x))
-
-        # v is unbounded, so the stationarity residual is just the derivative of the
-        # objective with respect to v: -s from the bilinear terms plus the penalties'
-        grad_f = -s + 2 * max(v - 1, 0) - 2 * max(-v - 1, 0)
-        return float(abs(grad_f))
+def bcd(x0, tol=1e-6, max_sweeps=6):
+    """
+    Cyclic block coordinate descent.
+    """
+    x = x0.copy()
+    history = [x.copy()]
+    for sweep in range(1, max_sweeps + 1):
+        for i in range(len(x)):
+            x[i] = minimize_block(x, i)
+            history.append(x.copy())
+        res = np.max(np.abs(gradient(x)))
+        print(f'sweep {sweep:3d} | max |gradient| {res:.3e}')
+        if res <= tol:
+            break
+    return np.array(history)
 
 
 eps = 0.01
 x0 = np.array([-1 - eps, 1 + 0.5 * eps, -1 - 0.25 * eps]) # near the vertex (-1, 1, -1)
 
-opt = ALBCD(subproblems=[CoordinateSubproblem(index=slice(0, 1)),  # owns x1
-                         CoordinateSubproblem(index=slice(1, 2)),  # owns x2
-                         CoordinateSubproblem(index=slice(2, 3))], # owns x3
-            x0=x0,
-            unconstrained=True,
-            opt_tol=1e-6,
-            max_inner_iter=6)
+history = bcd(x0)
 
-opt.solve()
-
-print('\nIterates (one per block solve)')
-for k, x in enumerate(opt.x_history):
+for k, x in enumerate(history):
     print(f'{k:3d}  ' + '  '.join(f'{xi:+.8f}' for xi in x))
-
-
-history = np.array(opt.x_history)
 
 plt.rcParams.update({'font.size': 14})
 fig = plt.figure(figsize=(7, 7))

@@ -86,7 +86,7 @@ class MissionSubproblem(Subproblem):
         optimizer.solve()
         v_new = optimizer.results["x"]
 
-        # cache SLSQP's multiplier and the trim constraint's Jacobian at the solution for residual()
+        # cache SLSQP's multiplier and the trim constraint's Jacobian at the solution for gradient()
         self._multipliers = np.asarray(optimizer.results["multipliers"])
         self._jac_con = derivs(v_new)[1:]
 
@@ -96,7 +96,7 @@ class MissionSubproblem(Subproblem):
         fuelburns[self.i] = fuelburn(self.i, v_new[:num_twist_cp], v_new[-1])
         fuelburn_history.append(np.mean(fuelburns))
 
-    def residual(self, x, y, mu, data) -> float:
+    def gradient(self, x, y, mu, data) -> np.ndarray:
         y, mu = torch.as_tensor(y), torch.as_tensor(mu)
         v = self.decompose(x)
         grad_f = torch.func.grad(lambda v: self.functions(v, x, y, mu)[0])(torch.as_tensor(v)).numpy()
@@ -104,7 +104,7 @@ class MissionSubproblem(Subproblem):
         # Lagrangian gradient (with SLSQP's multiplier for the trim constraint) projected onto
         # the box bounds: zero iff v is a KKT point of this block's subproblem
         grad_L = grad_f - self._jac_con.T @ self._multipliers
-        return float(np.max(np.abs(v - np.clip(v - grad_L, self.XL, self.XU))))
+        return v - np.clip(v - grad_L, self.XL, self.XU)
 
 
 # every mission starts from the jig twist and alpha0

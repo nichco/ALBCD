@@ -32,10 +32,10 @@ class Block(Subproblem):
         outputs["phi"] = np.array([outputs["x"][0] - outputs["x"][1]])
         outputs[f"v{self.index}"] = v
 
-    def residual(self, x, y, mu, data):
+    def gradient(self, x, y, mu, data):
         y, mu = y[0], mu[0]
         phi = x[0] - x[1]
-        return abs(2 * (x[self.index] - self._target(data)) + self.sign * (y + mu * phi))
+        return np.atleast_1d(2 * (x[self.index] - self._target(data)) + self.sign * (y + mu * phi))
 
 
 def make_solver(**kwargs):
@@ -157,12 +157,12 @@ def test_subproblem_helpers():
     np.testing.assert_array_equal(x, [0, 1, 2, 3])  # recompose returns a copy
 
 
-def test_subproblem_requires_solve_and_residual():
+def test_subproblem_requires_solve_and_gradient():
     sub = Subproblem(slice(0, 1))  # setup() is optional
     with pytest.raises(NotImplementedError):
         sub.solve(np.zeros(1), np.zeros(0), np.zeros(0), {}, {})
     with pytest.raises(NotImplementedError):
-        sub.residual(np.zeros(1), np.zeros(0), np.zeros(0), {})
+        sub.gradient(np.zeros(1), np.zeros(0), np.zeros(0), {})
 
 
 class QuadraticBlock(Subproblem):
@@ -171,8 +171,8 @@ class QuadraticBlock(Subproblem):
     def solve(self, x, y, mu, data, outputs):
         outputs["x"] = self.recompose(x, (A, B)[self.index] - self.other(x)[0] / 2)
 
-    def residual(self, x, y, mu, data):
-        return abs(2 * (x[self.index] - (A, B)[self.index]) + self.other(x)[0])
+    def gradient(self, x, y, mu, data):
+        return np.atleast_1d(2 * (x[self.index] - (A, B)[self.index]) + self.other(x)[0])
 
 
 class PowellBlock(Subproblem):
@@ -185,9 +185,9 @@ class PowellBlock(Subproblem):
         s = np.sum(self.other(x))
         outputs["x"] = self.recompose(x, np.sign(s) * (1 + abs(s) / 2))
 
-    def residual(self, x, y, mu, data):
+    def gradient(self, x, y, mu, data):
         grad = -(np.sum(x) - x) + 2 * np.maximum(x - 1, 0) - 2 * np.maximum(-x - 1, 0)
-        return abs(grad[self.index])
+        return np.atleast_1d(grad[self.index])
 
 
 def test_unconstrained(capsys):

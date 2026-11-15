@@ -84,14 +84,14 @@ class ScenarioSubproblem(Subproblem):
         v_new = optimizer.results["x"] / x_scaler
 
         # cache SLSQP's multipliers (rescaled from the c_scaler-scaled constraints SLSQP solves
-        # with) and the local constraints' Jacobian at the solution for residual()
+        # with) and the local constraints' Jacobian at the solution for gradient()
         self._multipliers = np.asarray(optimizer.results["multipliers"]) * c_scaler
         self._jac_con = np.asarray(self._jac(jnp.asarray(v_new)))
 
         outputs["x"] = self.recompose(x, v_new)
         outputs["phi"] = np.asarray(consensus(designs(outputs["x"])))
 
-    def residual(self, x, y, mu, data) -> float:
+    def gradient(self, x, y, mu, data) -> np.ndarray:
         args = tuple(jnp.asarray(a) for a in (x, y, mu))
         v = self.decompose(x)
         grad_f = np.asarray(self._grad(jnp.asarray(v), *args))
@@ -99,7 +99,7 @@ class ScenarioSubproblem(Subproblem):
         # Lagrangian gradient (with SLSQP's multipliers for the local constraints) projected onto
         # the box bounds: zero iff v is a KKT point of this block's subproblem
         grad_L = grad_f - self._jac_con.T @ self._multipliers
-        return float(np.max(np.abs(v - np.clip(v - grad_L, xl, xu))))
+        return v - np.clip(v - grad_L, xl, xu)
 
 
 # every scenario starts from the same initial guess

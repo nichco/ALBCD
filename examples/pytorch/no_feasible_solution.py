@@ -67,13 +67,13 @@ class Subproblem1(Subproblem):
         v_new = optimizer.results['x']
 
         # Cache SLSQP's own converged multipliers and the constraint Jacobian at the
-        # solution, so residual() can reuse them
+        # solution, so gradient() can reuse them
         self._multipliers = optimizer.results['multipliers']
         self._jac_con = torch.func.jacrev(torch_con)(torch.as_tensor(v_new))
 
         outputs["x"] = self.recompose(x, v_new)
 
-    def residual(self, x, y, mu, data) -> float:
+    def gradient(self, x, y, mu, data) -> np.ndarray:
 
         v = torch.as_tensor(self.decompose(x))
         other = torch.as_tensor(self.other(x))
@@ -83,7 +83,7 @@ class Subproblem1(Subproblem):
         jac_con = np.atleast_2d(np.asarray(self._jac_con))
         multipliers = np.asarray(self._multipliers)
         resid = grad_f - jac_con.T @ multipliers
-        return float(np.max(np.abs(resid)))
+        return resid
 
 
 class Subproblem2(Subproblem):
@@ -120,13 +120,13 @@ class Subproblem2(Subproblem):
         v_new = optimizer.results['x']
 
         # Cache SLSQP's own converged multipliers and the constraint Jacobian at the
-        # solution, so residual() can reuse them
+        # solution, so gradient() can reuse them
         self._multipliers = optimizer.results['multipliers']
         self._jac_con = torch.func.jacrev(torch_con)(torch.as_tensor(v_new))
 
         outputs["x"] = self.recompose(x, v_new)
 
-    def residual(self, x, y, mu, data) -> float:
+    def gradient(self, x, y, mu, data) -> np.ndarray:
 
         v = torch.as_tensor(self.decompose(x))
         other = torch.as_tensor(self.other(x))
@@ -136,7 +136,7 @@ class Subproblem2(Subproblem):
         jac_con = np.atleast_2d(np.asarray(self._jac_con))
         multipliers = np.asarray(self._multipliers)
         resid = grad_f - jac_con.T @ multipliers
-        return float(np.max(np.abs(resid)))
+        return resid
 
 
 opt = ALBCD(subproblems=[Subproblem1(index=slice(0, 1)),  # owns x1

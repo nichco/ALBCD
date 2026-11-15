@@ -89,7 +89,7 @@ def solve_slsqp(fns, args, v0, x_scaler, c_scaler, ftol, cl=0.0, cu=0.0, tau=0.0
     """
     w = tau * x_scaler**2  # proximal weight on each unscaled variable
     # modopt passes numpy arrays; convert them so the compiled functions always see JAX
-    # arrays, as they do in residual(). jax.jit compiles numpy and JAX arguments separately.
+    # arrays, as they do in gradient(). jax.jit compiles numpy and JAX arguments separately.
     prob = mo.ProblemLite(x0=v0,
                           obj=lambda v: np.float64(fns.obj(jnp.asarray(v), *args)) + 0.5 * np.sum(w * (v - v0)**2),
                           grad=lambda v: np.array(fns.grad(jnp.asarray(v), *args)) + w * (v - v0),
@@ -100,7 +100,7 @@ def solve_slsqp(fns, args, v0, x_scaler, c_scaler, ftol, cl=0.0, cu=0.0, tau=0.0
     optimizer.solve()
     v = optimizer.results['x'] / x_scaler
     # SLSQP solves in c_scaler-scaled constraint space, so its multipliers are
-    # rescaled to the unscaled constraints used in the residual() methods below
+    # rescaled to the unscaled constraints used in the gradient() methods below
     multipliers = np.asarray(optimizer.results['multipliers']) * c_scaler
     jac = np.atleast_2d(np.array(fns.jac(jnp.asarray(v))))
     return v, multipliers, jac
@@ -146,14 +146,14 @@ class AeroSubproblem(Subproblem):
         # StructSubproblem's variables, and so its weight, are unchanged by this solve
         outputs["phi"] = np.array(coupling(aero_loads, x_new[LOADS_SLICE], weight, x_new[WEIGHT_SLICE][0]))
 
-    def residual(self, x, y, mu, data) -> float:
+    def gradient(self, x, y, mu, data) -> np.ndarray:
         v, other, y, mu, weight = (jnp.asarray(a) for a in (self.decompose(x), self.other(x),
                                                                y, mu, data["weight"]))
         grad_f = np.array(self._fns.grad(v, other, y, mu, weight))
 
         # KKT stationarity with SLSQP's multipliers for the local constraint
         resid = grad_f - self._jac_con.T @ self._multipliers
-        return float(np.max(np.abs(resid)))
+        return resid
 
 
 class StructSubproblem(Subproblem):
@@ -213,7 +213,7 @@ class StructSubproblem(Subproblem):
         # AeroSubproblem's variables, and so its aero loads, are unchanged by this solve
         outputs["phi"] = np.array(coupling(aero_loads, v_new[num_cp_thickness:], weight, x_new[WEIGHT_SLICE][0]))
 
-    def residual(self, x, y, mu, data) -> float:
+    def gradient(self, x, y, mu, data) -> np.ndarray:
         v, other, y, mu, aero_loads = (jnp.asarray(a) for a in (self.decompose(x), self.other(x),
                                                                    y, mu, data["aero_loads"]))
         grad_f = np.array(self._fns.grad(v, other, y, mu, aero_loads))
@@ -226,7 +226,7 @@ class StructSubproblem(Subproblem):
         v = np.asarray(v)
         resid = np.where(v <= self.XL + self.BOUND_TOL, np.minimum(resid, 0.0), resid)
         resid = np.where(v >= self.XU - self.BOUND_TOL, np.maximum(resid, 0.0), resid)
-        return float(np.max(np.abs(resid)))
+        return resid
 
 
 # evaluate both models once at the initial design to initialize the copies and the shared data

@@ -154,21 +154,21 @@ class ArcSubproblem(Subproblem):
         optimizer.solve()
         v_new = optimizer.results["x"]
 
-        # cache SLSQP's multipliers and the local constraints' Jacobian at the solution for residual()
+        # cache SLSQP's multipliers and the local constraints' Jacobian at the solution for gradient()
         self._multipliers = np.asarray(optimizer.results["multipliers"])
         self._jac_con = np.asarray(self._jac(jnp.asarray(v_new)))
 
         outputs["x"] = self.recompose(x, v_new)
         outputs["phi"] = np.asarray(coupling(jnp.asarray(outputs["x"])))
 
-    def residual(self, x, y, mu, data) -> float:
+    def gradient(self, x, y, mu, data) -> np.ndarray:
         args = tuple(jnp.asarray(a) for a in (x, y, mu))
         v = self.decompose(x)
         grad_f = np.asarray(self._grad(jnp.asarray(v), *args))
 
         # Lagrangian gradient projected onto the box bounds: zero iff v is a KKT point of this block
         grad_L = grad_f - self._jac_con.T @ self._multipliers
-        return float(np.max(np.abs(v - np.clip(v - grad_L, xl, xu))))
+        return v - np.clip(v - grad_L, xl, xu)
 
 
 # initial guess (the same as lunar_ascent.py): a linear thrust angle sweep from 70 to -50 deg

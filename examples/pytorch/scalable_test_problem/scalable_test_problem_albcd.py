@@ -70,7 +70,7 @@ class Block(Subproblem):
         optimizer.solve()
         v = optimizer.results['x']
 
-        # SLSQP's multiplier of 0.8^2 - c >= 0, and the constraint gradient, for residual()
+        # SLSQP's multiplier of 0.8^2 - c >= 0, and the constraint gradient, for gradient()
         self._multiplier = np.asarray(optimizer.results['multipliers'])
         self._jac_con = np.array(torch.func.jacrev(con)(torch.as_tensor(v)))
 
@@ -78,13 +78,13 @@ class Block(Subproblem):
         outputs["x"] = x_new
         outputs["phi"] = np.array(coupling(torch.as_tensor(x_new)))
 
-    def residual(self, x, y, mu, data) -> float:
+    def gradient(self, x, y, mu, data) -> np.ndarray:
         """Projected-gradient KKT residual, with the sphere constraint's multiplier and the bounds."""
         x, y, mu = (torch.as_tensor(a) for a in (x, y, mu))
         v = np.array(self.decompose(x))
         grad = np.array(torch.func.grad(self.merit)(torch.as_tensor(v), x, y, mu))
         grad += self._jac_con.T @ self._multiplier
-        return float(np.max(np.abs(v - np.clip(v - grad, xl[self.index], xu[self.index]))))
+        return v - np.clip(v - grad, xl[self.index], xu[self.index])
 
 
 blocks = [Block(slice(i * m, (i + 1) * m)) for i in range(N - 1)]

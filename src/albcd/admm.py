@@ -112,7 +112,7 @@ class ADMM():
                 self.x_history.append(self.x.copy())
 
             primal = float(np.max(np.abs(self.phi)))
-            dual = float(max(sub.residual(self.x, self.y, self.mu, self.data) for sub in self.subproblems))
+            dual = float(max(np.linalg.norm(sub.gradient(self.x, self.y, self.mu, self.data), ord=np.inf) for sub in self.subproblems))
             self.feas_history.append(primal)
             self.opt_history.append(dual)
             log(f'iter {k:4d} | primal {primal:.3e} | dual {dual:.3e}')

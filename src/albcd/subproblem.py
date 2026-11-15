@@ -8,7 +8,7 @@ import numpy as np
 class Subproblem:
     """Base class for one block of an ALBCD problem.
 
-    Subclasses implement :meth:`solve` and :meth:`residual`, and can override
+    Subclasses implement :meth:`solve` and :meth:`gradient`, and can override
     :meth:`setup` for one-time work such as compiling functions. The solver
     passes both the current design vector ``x``, multipliers ``y``, penalty
     parameters ``mu`` and its ``data`` dictionary, and writes any output of
@@ -40,8 +40,12 @@ class Subproblem:
         """
         raise NotImplementedError
 
-    def residual(self, x, y, mu, data) -> float:
-        """Return the max-norm KKT stationarity residual of this block's subproblem at ``x``."""
+    def gradient(self, x, y, mu, data) -> np.ndarray:
+        """Return the KKT stationarity residual vector of this block's subproblem at ``x``.
+
+        One entry per variable of this block: the gradient of the block's (augmented)
+        Lagrangian, projected onto its bounds where it has them. The solver takes its max-norm.
+        """
         raise NotImplementedError
 
     def decompose(self, x):

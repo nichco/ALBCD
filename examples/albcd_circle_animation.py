@@ -58,10 +58,10 @@ class BlockSubproblem(Subproblem):
         outputs["x"] = self.recompose(x, optimizer.results['x'])
         outputs["phi"] = np.array([phi(*outputs["x"])])
 
-    def residual(self, x, y, mu, data) -> float:
+    def gradient(self, x, y, mu, data) -> np.ndarray:
         v = self.decompose(x)
         grad = augmented_lagrangian_grad(x, y[0], mu[0])[self.index]
-        return float(np.max(np.abs(v - np.clip(v - grad, self.xl, self.xu))))
+        return v - np.clip(v - grad, self.xl, self.xu)
 
 
 def run_albcd():

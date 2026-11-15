@@ -76,12 +76,12 @@ class Subproblem1(Subproblem):
         outputs["x"] = self.recompose(x, optimizer.results['x'])
         outputs["phi"] = np.array([phi(*outputs["x"])])
 
-    def residual(self, x, y, mu, data) -> float:
+    def gradient(self, x, y, mu, data) -> np.ndarray:
         """Projected-gradient stationarity residual: zero iff v is a KKT point for xl <= v <= xu."""
         v = self.decompose(x)
         args = (torch.as_tensor(a) for a in (v, self.other(x), y, mu))
         grad = torch.func.grad(self.objective)(*args).numpy()
-        return float(np.max(np.abs(v - np.clip(v - grad, self.xl, self.xu))))
+        return v - np.clip(v - grad, self.xl, self.xu)
 
 
 class Subproblem2(Subproblem):
@@ -109,12 +109,12 @@ class Subproblem2(Subproblem):
         outputs["x"] = self.recompose(x, optimizer.results['x'])
         outputs["phi"] = np.array([phi(*outputs["x"])])
 
-    def residual(self, x, y, mu, data) -> float:
+    def gradient(self, x, y, mu, data) -> np.ndarray:
         """Projected-gradient stationarity residual: zero iff v is a KKT point for xl <= v <= xu."""
         v = self.decompose(x)
         args = (torch.as_tensor(a) for a in (v, self.other(x), y, mu))
         grad = torch.func.grad(self.objective)(*args).numpy()
-        return float(np.max(np.abs(v - np.clip(v - grad, self.xl, self.xu))))
+        return v - np.clip(v - grad, self.xl, self.xu)
 
 
 opt = ALBCD(

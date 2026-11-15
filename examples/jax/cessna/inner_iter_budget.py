@@ -52,15 +52,15 @@ for n_inner in inner_iters:
     # here, untimed, so that compilation is not counted in the wall time
     for sub in opt.subproblems:
         sub.solve(opt.x, opt.y, opt.mu, opt.data, {})
-        sub.residual(opt.x, opt.y, opt.mu, opt.data)
+        sub.gradient(opt.x, opt.y, opt.mu, opt.data)
 
-    # ALBCD calls every subproblem's residual() after each sweep, in order, so the last
-    # subproblem's residual() marks the end of a sweep
+    # ALBCD calls every subproblem's gradient() after each sweep, in order, so the last
+    # subproblem's gradient() marks the end of a sweep
     deadline = [np.inf]
     solve_times, residual_times = [], []
     for sub in opt.subproblems:
         sub.solve = timed(sub.solve, solve_times, deadline)
-    opt.subproblems[-1].residual = timed(opt.subproblems[-1].residual, residual_times)
+    opt.subproblems[-1].gradient = timed(opt.subproblems[-1].gradient, residual_times)
 
     t0 = time.perf_counter()
     deadline[0] = t0 + budget

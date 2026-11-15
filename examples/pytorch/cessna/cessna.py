@@ -73,7 +73,7 @@ def solve_slsqp(obj, con, v0, x_scaler, c_scaler, ftol, cl=0.0, cu=0.0, xl=None,
     optimizer.solve()
     v = optimizer.results['x'] / x_scaler
     # SLSQP solves in c_scaler-scaled constraint space, so its multipliers are
-    # rescaled to the unscaled constraints used in the residual() methods below
+    # rescaled to the unscaled constraints used in the gradient() methods below
     multipliers = np.asarray(optimizer.results['multipliers']) * c_scaler
     jac = np.atleast_2d(np.array(torch.func.jacrev(con)(torch.as_tensor(v))))
     return v, multipliers, jac
@@ -116,14 +116,14 @@ class AeroSubproblem(Subproblem):
         outputs["phi"] = np.array(coupling(aero_loads, torch.as_tensor(x_new[LOADS_SLICE]),
                                            weight, torch.as_tensor(x_new[WEIGHT_SLICE][0])))
 
-    def residual(self, x, y, mu, data) -> float:
+    def gradient(self, x, y, mu, data) -> np.ndarray:
         v, other, y, mu, weight = (torch.as_tensor(a) for a in (self.decompose(x), self.other(x),
                                                                   y, mu, data["weight"]))
         grad_f = np.array(torch.func.grad(self.objective)(v, other, y, mu, weight))
 
         # KKT stationarity with SLSQP's multipliers for the local constraint
         resid = grad_f - self._jac_con.T @ self._multipliers
-        return float(np.max(np.abs(resid)))
+        return resid
 
 
 class StructSubproblem(Subproblem):
@@ -136,8 +136,10 @@ class StructSubproblem(Subproblem):
     # physical: a nonnegative wall, and a wall no thicker than the tube radius (beyond t = r the inner
     # radius is negative, so the area pi t (2r - t) shrinks as the wall thickens and goes negative past
     # t = 2r). The B-spline is a convex combination of its control points, so these bound the thickness
-    # everywhere. Both are inactive at the solution.
-    XL = np.concatenate([np.zeros(num_cp_thickness), np.full(2 * num_nodes, -np.inf)])
+    # everywhere. Both are inactive at the symmetric solution, but the lower bound can be active elsewhere,
+    # so gradient() accounts for active bounds.
+    BOUND_TOL = 1e-10  # a thickness control point within this distance (m) of a bound counts as on it
+    XL =np.concatenate([np.zeros(num_cp_thickness), np.full(2 * num_nodes, -np.inf)])
     XU = np.concatenate([np.full(num_cp_thickness, thickness_max), np.full(2 * num_nodes, np.inf)])
 
     def objective(self, v, other, y, mu, aero_loads):
@@ -177,14 +179,23 @@ class StructSubproblem(Subproblem):
         outputs["phi"] = np.array(coupling(aero_loads, aero_loads_copy,
                                            weight, torch.as_tensor(x_new[WEIGHT_SLICE][0])))
 
-    def residual(self, x, y, mu, data) -> float:
+    def gradient(self, x, y, mu, data) -> np.ndarray:
         v, other, y, mu, aero_loads = (torch.as_tensor(a) for a in (self.decompose(x), self.other(x),
                                                                       y, mu, data["aero_loads"]))
         grad_f = np.array(torch.func.grad(self.objective)(v, other, y, mu, aero_loads))
 
         # KKT stationarity with SLSQP's multipliers for the stress and thickness constraints
         resid = grad_f - self._jac_con.T @ self._multipliers
-        return float(np.max(np.abs(resid)))
+
+        # SLSQP returns no multipliers for the bounds XL <= v <= XU. At an active bound the remaining
+        # component is that bound's multiplier, which KKT allows to be nonzero with the right sign:
+        # resid_i >= 0 at a lower bound (the Lagrangian would decrease only by leaving the box), and
+        # resid_i <= 0 at an upper bound. Only a component of the wrong sign is a stationarity error.
+        v = np.asarray(v)
+        at_lower = (v <= self.XL + self.BOUND_TOL) & (resid > 0)
+        at_upper = (v >= self.XU - self.BOUND_TOL) & (resid < 0)
+        resid[at_lower | at_upper] = 0.0
+        return resid
 
 
 # evaluate both models once at the initial design to initialize the copies and the shared data

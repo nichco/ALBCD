@@ -64,7 +64,7 @@ class FlightSubproblem(Subproblem):
         phi = self.budget(v, x)
         return outputs[self.i](v)[-1] + y[0] * phi + 0.5 * mu[0] * phi**2
 
-    def gradient(self, v, x, y, mu):
+    def objective_gradient(self, v, x, y, mu):
         grad = outputs_jac[self.i](v)[-1].copy()
         grad[-1] += y[0] + mu[0] * self.budget(v, x)
         return grad
@@ -72,7 +72,7 @@ class FlightSubproblem(Subproblem):
     def solve(self, x, y, mu, data, outputs_) -> None:
         prob = mo.ProblemLite(x0=np.array(self.decompose(x)),
                               obj=lambda v: self.objective(v, x, y, mu),
-                              grad=lambda v: self.gradient(v, x, y, mu),
+                              grad=lambda v: self.objective_gradient(v, x, y, mu),
                               con=lambda v: outputs[self.i](v)[:-1],
                               jac=lambda v: outputs_jac[self.i](v)[:-1],
                               xl=xl, xu=xu, cl=cl, cu=cu, x_scaler=x_scaler)
@@ -91,10 +91,10 @@ class FlightSubproblem(Subproblem):
         outputs_["x"] = x_new
         outputs_["phi"] = np.array([taus(x_new).sum() - T_budget])
 
-    def residual(self, x, y, mu, data) -> float:
+    def gradient(self, x, y, mu, data) -> np.ndarray:
         v = self.decompose(x)
-        grad_L = self.gradient(v, x, y, mu) - self._rows.T @ self._multipliers
-        return float(np.max(np.abs(v - np.clip(v - grad_L, xl, xu))))
+        grad_L = self.objective_gradient(v, x, y, mu) - self._rows.T @ self._multipliers
+        return v - np.clip(v - grad_L, xl, xu)
 
 
 x0 = np.concatenate([initial_guess(fl) for fl in flights])

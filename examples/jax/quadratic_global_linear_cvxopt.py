@@ -63,7 +63,7 @@ class Subproblem1(Subproblem):
 
         # No general (in)equality constraints at the block level -- only box
         # bounds -- so cache the bounds for the projected-gradient stationarity
-        # check in residual() instead of constraint multipliers/Jacobian.
+        # check in gradient() instead of constraint multipliers/Jacobian.
         self._xl = xl
         self._xu = xu
 
@@ -76,7 +76,7 @@ class Subproblem1(Subproblem):
         outputs["x"] = x_new
         outputs["phi"] = np.array([g0])
 
-    def residual(self, x, y, mu, data) -> float:
+    def gradient(self, x, y, mu, data) -> np.ndarray:
 
         v = jnp.asarray(self.decompose(x))
         other = jnp.asarray(self.other(x))
@@ -89,7 +89,7 @@ class Subproblem1(Subproblem):
         # zero iff v satisfies the KKT conditions for xl <= v <= xu
         proj = np.clip(v - grad_f, self._xl, self._xu)
         resid = v - proj
-        return float(np.max(np.abs(resid)))
+        return resid
 
 
 class Subproblem2(Subproblem):
@@ -129,7 +129,7 @@ class Subproblem2(Subproblem):
         v_new = optimizer.results['x']
 
         # No box bounds on this block either -- record unbounded limits so
-        # residual() can use the same projected-gradient check.
+        # gradient() can use the same projected-gradient check.
         self._xl = np.full_like(v_new, -np.inf)
         self._xu = np.full_like(v_new, np.inf)
 
@@ -142,7 +142,7 @@ class Subproblem2(Subproblem):
         outputs["x"] = x_new
         outputs["phi"] = np.array([g0])
 
-    def residual(self, x, y, mu, data) -> float:
+    def gradient(self, x, y, mu, data) -> np.ndarray:
 
         v = jnp.asarray(self.decompose(x))
         other = jnp.asarray(self.other(x))
@@ -155,7 +155,7 @@ class Subproblem2(Subproblem):
         # zero iff v satisfies the KKT conditions for xl <= v <= xu
         proj = np.clip(v - grad_f, self._xl, self._xu)
         resid = v - proj
-        return float(np.max(np.abs(resid)))
+        return resid
 
 
 v_init = np.array([1.0, 0.0, -1.0])

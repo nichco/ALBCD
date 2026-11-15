@@ -77,7 +77,7 @@ def solve_slsqp(fns, args, v0, x_scaler, c_scaler, ftol, xl=None, xu=None):
     Returns the solution, SLSQP's constraint multipliers and the constraint Jacobian at the solution.
     """
     # modopt passes numpy arrays; convert them so the compiled functions always see JAX
-    # arrays, as they do in residual(). jax.jit compiles numpy and JAX arguments separately.
+    # arrays, as they do in gradient(). jax.jit compiles numpy and JAX arguments separately.
     prob = mo.ProblemLite(x0=v0,
                           obj=lambda v: np.float64(fns.obj(jnp.asarray(v), *args)),
                           grad=lambda v: np.array(fns.grad(jnp.asarray(v), *args)),
@@ -88,7 +88,7 @@ def solve_slsqp(fns, args, v0, x_scaler, c_scaler, ftol, xl=None, xu=None):
     optimizer.solve()
     v = optimizer.results['x'] / x_scaler
     # SLSQP solves in c_scaler-scaled constraint space, so its multipliers are
-    # rescaled to the unscaled constraints used in the residual() methods below
+    # rescaled to the unscaled constraints used in the gradient() methods below
     multipliers = np.asarray(optimizer.results['multipliers']) * c_scaler
     jac = np.atleast_2d(np.array(fns.jac(jnp.asarray(v))))
     return v, multipliers, jac
@@ -133,14 +133,14 @@ class AeroSubproblem(Subproblem):
         # StructSubproblem's variables, and so its weight, are unchanged by this solve
         outputs["phi"] = np.array(coupling(aero_loads, x_new[LOADS_SLICE], weight, x_new[WEIGHT_SLICE][0]))
 
-    def residual(self, x, y, mu, data) -> float:
+    def gradient(self, x, y, mu, data) -> np.ndarray:
         v, other, y, mu, weight = (jnp.asarray(a) for a in (self.decompose(x), self.other(x),
                                                                y, mu, data["weight"]))
         grad_f = np.array(self._fns.grad(v, other, y, mu, weight))
 
         # KKT stationarity with SLSQP's multipliers for the local constraint
         resid = grad_f - self._jac_con.T @ self._multipliers
-        return float(np.max(np.abs(resid)))
+        return resid
 
 
 class StructSubproblem(Subproblem):
@@ -148,7 +148,7 @@ class StructSubproblem(Subproblem):
 
     # thickness_cp, drag copies, lift copies. The drag loads are ~100x smaller than the lift
     # loads, so they get their own scaler; a larger thickness scaler would magnify SLSQP's
-    # termination error in residual(), which is measured in unscaled variables.
+    # termination error in gradient(), which is measured in unscaled variables.
     X_SCALER = np.concatenate([np.full(num_cp_thickness, 1e1), np.full(num_nodes, 1.0), np.full(num_nodes, 1e-2)])
     C_SCALER = 1e1  # tip displacements
     # SLSQP tolerance. Tighter than AeroSubproblem's: with 1e-8, this block's residual
@@ -195,7 +195,7 @@ class StructSubproblem(Subproblem):
         # AeroSubproblem's variables, and so its aero loads, are unchanged by this solve
         outputs["phi"] = np.array(coupling(aero_loads, aero_loads_copy, weight, x_new[WEIGHT_SLICE][0]))
 
-    def residual(self, x, y, mu, data) -> float:
+    def gradient(self, x, y, mu, data) -> np.ndarray:
         v, other, y, mu, aero_loads = (jnp.asarray(a) for a in (self.decompose(x), self.other(x),
                                                                    y, mu, data["aero_loads"]))
         grad_f = np.array(self._fns.grad(v, other, y, mu, aero_loads))
@@ -209,7 +209,7 @@ class StructSubproblem(Subproblem):
         violation = np.abs(resid)
         violation = np.where(v <= self.XL + 1e-6, np.maximum(0.0, -resid), violation)
         violation = np.where(v >= self.XU - 1e-6, np.maximum(0.0, resid), violation)
-        return float(np.max(violation))
+        return violation
 
 
 # evaluate both models once at the initial design to initialize the copies and the shared weight

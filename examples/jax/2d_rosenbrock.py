@@ -46,14 +46,14 @@ class Subproblem1(Subproblem):
 
         outputs["x"] = self.recompose(x, optimizer.results['x'])
 
-    def residual(self, x, y, mu, data) -> float:
+    def gradient(self, x, y, mu, data) -> np.ndarray:
 
         v = jnp.asarray(self.decompose(x))
         other = jnp.asarray(self.other(x))
 
         # v is unbounded, so the stationarity residual is just the gradient
         grad_f = np.asarray(jax.grad(self.objective)(v, other))
-        return float(np.max(np.abs(grad_f)))
+        return grad_f
 
 
 class Subproblem2(Subproblem):
@@ -76,14 +76,14 @@ class Subproblem2(Subproblem):
 
         outputs["x"] = self.recompose(x, optimizer.results['x'])
 
-    def residual(self, x, y, mu, data) -> float:
+    def gradient(self, x, y, mu, data) -> np.ndarray:
 
         v = jnp.asarray(self.decompose(x))
         other = jnp.asarray(self.other(x))
 
         # v is unbounded, so the stationarity residual is just the gradient
         grad_f = np.asarray(jax.grad(self.objective)(v, other))
-        return float(np.max(np.abs(grad_f)))
+        return grad_f
 
 
 opt = ALBCD(subproblems=[Subproblem1(index=slice(0, 1)),  # owns x1

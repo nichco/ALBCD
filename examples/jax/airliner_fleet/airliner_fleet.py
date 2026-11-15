@@ -86,7 +86,7 @@ class FlightSubproblem(Subproblem):
         phi = self.budget(v, x)
         return self.outputs(v)[-1] + y[0] * phi + 0.5 * mu[0] * phi**2
 
-    def gradient(self, v, x, y, mu):
+    def objective_gradient(self, v, x, y, mu):
         grad = self.outputs_jac(v)[-1].copy()  # d(fuel)/dv
         grad[-1] += y[0] + mu[0] * self.budget(v, x)
         return grad
@@ -96,7 +96,7 @@ class FlightSubproblem(Subproblem):
             y_history.append(float(y[0]))
         prob = mo.ProblemLite(x0=np.array(self.decompose(x)),
                               obj=lambda v: self.objective(v, x, y, mu),
-                              grad=lambda v: self.gradient(v, x, y, mu),
+                              grad=lambda v: self.objective_gradient(v, x, y, mu),
                               con=lambda v: self.outputs(v)[:-1],
                               jac=lambda v: self.outputs_jac(v)[:-1],
                               xl=xl, xu=xu, cl=cl, cu=cu, x_scaler=x_scaler)
@@ -104,20 +104,20 @@ class FlightSubproblem(Subproblem):
         optimizer.solve()
         v_new = optimizer.results["x"] / x_scaler
 
-        # cache SLSQP's multipliers and the matching rows of the local constraints' Jacobian for residual()
+        # cache SLSQP's multipliers and the matching rows of the local constraints' Jacobian for gradient()
         self._multipliers = np.asarray(optimizer.results["multipliers"])
         self._rows = kkt_rows(self.outputs_jac(v_new)[:-1])
 
         outputs["x"] = self.recompose(x, v_new)
         outputs["phi"] = np.array([taus(outputs["x"]).sum() - T_budget])
 
-    def residual(self, x, y, mu, data) -> float:
+    def gradient(self, x, y, mu, data) -> np.ndarray:
         v = self.decompose(x)
 
         # Lagrangian gradient (with SLSQP's multipliers for the local constraints) projected onto
         # the box bounds: zero iff v is a KKT point of this block's subproblem
-        grad_L = self.gradient(v, x, y, mu) - self._rows.T @ self._multipliers
-        return float(np.max(np.abs(v - np.clip(v - grad_L, xl, xu))))
+        grad_L = self.objective_gradient(v, x, y, mu) - self._rows.T @ self._multipliers
+        return v - np.clip(v - grad_L, xl, xu)
 
 
 x0 = np.concatenate([initial_guess(fl) for fl in flights])

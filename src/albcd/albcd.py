@@ -80,7 +80,7 @@ class ALBCD():
         optimal (the last inner loop reached the final ``opt_tol``); when
         unconstrained, only optimal.
     data : dict
-        Quantities shared between subproblems, passed to each solve() and residual().
+        Quantities shared between subproblems, passed to each solve() and gradient().
     x_history : list of ndarray
         ``x0`` followed by ``x`` after every subproblem solve.
     feas_history : list of float
@@ -190,7 +190,7 @@ class ALBCD():
 
                     self.feas_history.append(float(np.max(np.abs(self.phi), initial=0.0)))
 
-                    res = max(sub.residual(self.x, self.y, self.mu, self.data) for sub in self.subproblems)
+                    res = max(np.linalg.norm(sub.gradient(self.x, self.y, self.mu, self.data), ord=np.inf) for sub in self.subproblems)
                     self.opt_history.append(res)
 
                     log(f'outer {k:3d} | sweep {j:3d} | opt_res {res:.3e}')

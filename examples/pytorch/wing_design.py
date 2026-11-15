@@ -81,7 +81,7 @@ class WingSubproblem(Subproblem):
 
         outputs["x"] = self.recompose(x, optimizer.results['x'])
 
-    def residual(self, x, y, mu, data) -> float:
+    def gradient(self, x, y, mu, data) -> np.ndarray:
         v = torch.as_tensor(self.decompose(x))
         other = torch.as_tensor(self.other(x))
         grad_f = np.asarray(torch.func.grad(self.objective)(v, other))
@@ -89,7 +89,7 @@ class WingSubproblem(Subproblem):
         # at the lower bound only a negative gradient (pointing into the feasible region) counts
         if np.asarray(v)[0] <= self.XL[self.index] + 1e-8:
             grad_f = np.minimum(grad_f, 0.0)
-        return float(np.max(np.abs(grad_f)))
+        return grad_f
 
 
 opt = ALBCD(subproblems=[WingSubproblem(index=np.array([0])),  # owns the span b
