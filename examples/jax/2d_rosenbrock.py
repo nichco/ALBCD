@@ -4,9 +4,8 @@
 
     min (1 - x1)^2 + (x2 - x1^2)^2
 
-Block 1 owns x1 and block 2 owns x2. There are no constraints, so ALBCD runs only its
-BCD inner loop (unconstrained=True). Each block solve lands on the curve where that
-block is optimal (df/dx1 = 0 or df/dx2 = 0), so the iterates zigzag between the two
+Block 1 owns x1 and block 2 owns x2, and a plain cyclic block coordinate descent loop
+is written out below. Each block solve lands on the curve where that block is optimal (df/dx1 = 0 or df/dx2 = 0), so the iterates zigzag between the two
 curves toward the minimum at (1, 1).
 
 Gradients come from JAX. Run this file to solve the problem and plot the iterates.
@@ -18,87 +17,50 @@ import jax
 jax.config.update("jax_enable_x64", True) # jax defaults to float32
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-from albcd import ALBCD, Subproblem
 import warnings
 warnings.filterwarnings("ignore")
 
 
-class Subproblem1(Subproblem):
-
-    def objective(self, v, other):
-        x1 = v[0]
-        x2 = other[0]
-        return jnp.squeeze((1 - x1)**2 + (x2 - x1**2)**2)
-
-    def solve(self, x, y, mu, data, outputs) -> None:
-        v0 = np.asarray(self.decompose(x), dtype=float)
-        other = jnp.asarray(self.other(x))
-
-        jax_obj = lambda v: self.objective(v, other)
-
-        jaxprob = mo.JaxProblem(x0=v0, jax_obj=jax_obj, order=1)
-
-        # a tight ftol: near the solution a block solve can only lower f by about
-        # grad^2 / (2 d2f/dv2), which falls below a looser ftol (e.g. 1e-7) before the
-        # residual reaches opt_tol, so SLSQP would stop without moving and BCD would stall
-        optimizer = mo.SLSQP(jaxprob, solver_options={'maxiter': 100, 'ftol': 1e-12}, turn_off_outputs=True)
-        optimizer.solve()
-
-        outputs["x"] = self.recompose(x, optimizer.results['x'])
-
-    def gradient(self, x, y, mu, data) -> np.ndarray:
-
-        v = jnp.asarray(self.decompose(x))
-        other = jnp.asarray(self.other(x))
-
-        # v is unbounded, so the stationarity residual is just the gradient
-        grad_f = np.asarray(jax.grad(self.objective)(v, other))
-        return grad_f
+def f(x):
+    return (1 - x[0])**2 + (x[1] - x[0]**2)**2
 
 
-class Subproblem2(Subproblem):
+def minimize_block(x, i):
+    """
+    Minimizes f over x[i] with the other variable fixed.
+    """
+    xj = jnp.asarray(x)
+    prob = mo.JaxProblem(x0=x[i:i+1].copy(), jax_obj=lambda v: f(xj.at[i].set(v[0])), order=1)
 
-    def objective(self, v, other):
-        x2 = v[0]
-        x1 = other[0]
-        return jnp.squeeze((1 - x1)**2 + (x2 - x1**2)**2)
-
-    def solve(self, x, y, mu, data, outputs) -> None:
-        v0 = np.asarray(self.decompose(x), dtype=float)
-        other = jnp.asarray(self.other(x))
-
-        jax_obj = lambda v: self.objective(v, other)
-
-        jaxprob = mo.JaxProblem(x0=v0, jax_obj=jax_obj, order=1)
-
-        optimizer = mo.SLSQP(jaxprob, solver_options={'maxiter': 100, 'ftol': 1e-12}, turn_off_outputs=True)
-        optimizer.solve()
-
-        outputs["x"] = self.recompose(x, optimizer.results['x'])
-
-    def gradient(self, x, y, mu, data) -> np.ndarray:
-
-        v = jnp.asarray(self.decompose(x))
-        other = jnp.asarray(self.other(x))
-
-        # v is unbounded, so the stationarity residual is just the gradient
-        grad_f = np.asarray(jax.grad(self.objective)(v, other))
-        return grad_f
+    # a tight ftol: near the solution a block solve can only lower f by about
+    # grad^2 / (2 d2f/dv2), which falls below a looser ftol (e.g. 1e-7) before the
+    # gradient reaches tol, so SLSQP would stop without moving and BCD would stall
+    optimizer = mo.SLSQP(prob, solver_options={'maxiter': 100, 'ftol': 1e-12}, turn_off_outputs=True)
+    optimizer.solve()
+    return optimizer.results['x'][0]
 
 
-opt = ALBCD(subproblems=[Subproblem1(index=slice(0, 1)),  # owns x1
-                         Subproblem2(index=slice(1, 2))], # owns x2
-            x0=np.array([-1.0, -1.0]),
-            unconstrained=True,
-            opt_tol=1e-4,
-            max_inner_iter=300)
+def bcd(x0, tol=1e-4, max_sweeps=300):
+    """
+    Cyclic block coordinate descent.
+    """
+    x = x0.copy()
+    history = [x.copy()]
+    for sweep in range(1, max_sweeps + 1):
+        for i in range(len(x)):
+            x[i] = minimize_block(x, i)
+            history.append(x.copy())
+        res = np.max(np.abs(jax.grad(f)(x)))
+        print(f'sweep {sweep:3d} | max |gradient| {res:.3e}')
+        if res <= tol:
+            break
+    return np.array(history)
 
-opt.solve()
 
-print('Solution: ', opt.x)
+history = bcd(np.array([-1.0, -1.0]))
 
+print('Solution: ', history[-1])
 
-history = np.array(opt.x_history)
 x1_history = history[:, 0]
 x2_history = history[:, 1]
 

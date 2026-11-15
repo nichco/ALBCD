@@ -9,9 +9,8 @@ where P is the power a propeller aircraft needs for steady level flight with a
 rectangular wing of span b and chord c: the viscous and induced drag times the
 flight speed, divided by a propeller efficiency that peaks at v_bar.
 
-Block 1 owns the span b and block 2 owns the chord c. There are no coupling
-constraints, so ALBCD runs only its BCD inner loop (unconstrained=True). Each block
-solve lands on the curve where that block is optimal (dP/db = 0 or dP/dc = 0), so the
+Block 1 owns the span b and block 2 owns the chord c, and a plain cyclic block
+coordinate descent loop is written out below. Each block solve lands on the curve where that block is optimal (dP/db = 0 or dP/dc = 0), so the
 iterates zigzag between the two curves toward the minimum.
 
 Gradients come from JAX. Run this file to solve the problem, compare the result
@@ -24,7 +23,6 @@ import jax
 jax.config.update("jax_enable_x64", True) # jax defaults to float32
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-from albcd import ALBCD, Subproblem
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -54,63 +52,67 @@ def power_required(b, c):
     return (viscous_drag + induced_drag) * v / eta
 
 
-class WingSubproblem(Subproblem):
-    """Minimizes the power over the one variable in index (0: span, 1: chord), with the other fixed."""
-
-    XL = np.array([0.0, 1e-2])  # lower bounds on [b, c]
-
-    def objective(self, v, other):
-        b, c = (v[0], other[0]) if self.index[0] == 0 else (other[0], v[0])
-        return jnp.squeeze(power_required(b, c))
-
-    def solve(self, x, y, mu, data, outputs) -> None:
-        v0 = np.asarray(self.decompose(x), dtype=float)
-        other = jnp.asarray(self.other(x))
-
-        jaxprob = mo.JaxProblem(x0=v0, jax_obj=lambda v: self.objective(v, other), order=1,
-                                xl=self.XL[self.index], xu=np.inf)
-
-        # a tight ftol, as in 2d_rosenbrock.py: near the solution a block solve lowers P by
-        # less than a looser ftol, so SLSQP would stop without moving and BCD would stall
-        optimizer = mo.SLSQP(jaxprob, solver_options={'maxiter': 300, 'ftol': 1e-12}, turn_off_outputs=True)
-        optimizer.solve()
-
-        outputs["x"] = self.recompose(x, optimizer.results['x'])
-
-    def gradient(self, x, y, mu, data) -> np.ndarray:
-        v = jnp.asarray(self.decompose(x))
-        other = jnp.asarray(self.other(x))
-        grad_f = np.asarray(jax.grad(self.objective)(v, other))
-
-        # at the lower bound only a negative gradient (pointing into the feasible region) counts
-        if np.asarray(v)[0] <= self.XL[self.index] + 1e-8:
-            grad_f = np.minimum(grad_f, 0.0)
-        return grad_f
+XL = np.array([0.0, 1e-2])  # lower bounds on [b, c]
 
 
-opt = ALBCD(subproblems=[WingSubproblem(index=np.array([0])),  # owns the span b
-                         WingSubproblem(index=np.array([1]))], # owns the chord c
-            x0=np.array([15.0, 1.2]),
-            unconstrained=True,
-            opt_tol=1e-3,
-            max_inner_iter=300)
+def f(x):
+    return power_required(x[0], x[1])
 
-opt.solve()
 
-print('Solution (span, chord): ', opt.x)
-print('Power (W): ', float(power_required(*opt.x)))
+def minimize_block(x, i):
+    """
+    Minimizes the power over x[i] (0: span, 1: chord) with the other variable fixed.
+    """
+    xj = jnp.asarray(x)
+    prob = mo.JaxProblem(x0=x[i:i+1].copy(), jax_obj=lambda v: f(xj.at[i].set(v[0])), order=1,
+                         xl=XL[i:i+1], xu=np.inf)
+
+    # a tight ftol, as in 2d_rosenbrock.py: near the solution a block solve lowers P by
+    # less than a looser ftol, so SLSQP would stop without moving and BCD would stall
+    optimizer = mo.SLSQP(prob, solver_options={'maxiter': 300, 'ftol': 1e-12}, turn_off_outputs=True)
+    optimizer.solve()
+    return optimizer.results['x'][0]
+
+
+def projected_gradient(x):
+    """
+    Gradient of the power; at a lower bound only a negative entry (pointing into the feasible region) counts.
+    """
+    g = np.asarray(jax.grad(f)(x))
+    return np.where(x <= XL + 1e-8, np.minimum(g, 0.0), g)
+
+
+def bcd(x0, tol=1e-3, max_sweeps=300):
+    """
+    Cyclic block coordinate descent.
+    """
+    x = x0.copy()
+    history = [x.copy()]
+    for sweep in range(1, max_sweeps + 1):
+        for i in range(len(x)):
+            x[i] = minimize_block(x, i)
+            history.append(x.copy())
+        res = np.max(np.abs(projected_gradient(x)))
+        print(f'sweep {sweep:3d} | max |gradient| {res:.3e}')
+        if res <= tol:
+            break
+    return np.array(history)
+
+
+history = bcd(np.array([15.0, 1.2]))
+x = history[-1]
+
+print('Solution (span, chord): ', x)
+print('Power (W): ', float(f(x)))
 
 # monolithic reference: the same problem solved with one SLSQP over both variables
-jaxprob = mo.JaxProblem(x0=np.array([15.0, 1.2]), jax_obj=lambda x: power_required(x[0], x[1]),
-                        xl=WingSubproblem.XL, xu=np.full(2, np.inf))
-optimizer = mo.SLSQP(jaxprob, solver_options={'maxiter': 300, 'ftol': 1e-12}, turn_off_outputs=True)
+prob = mo.JaxProblem(x0=np.array([15.0, 1.2]), jax_obj=f, xl=XL, xu=np.full(2, np.inf))
+optimizer = mo.SLSQP(prob, solver_options={'maxiter': 300, 'ftol': 1e-12}, turn_off_outputs=True)
 optimizer.solve()
 x_star = optimizer.results['x']
 print('Monolithic solution (span, chord): ', x_star)
-print('Relative error: ', np.linalg.norm(opt.x - x_star) / np.linalg.norm(x_star))
+print('Relative error: ', np.linalg.norm(x - x_star) / np.linalg.norm(x_star))
 
-
-history = np.array(opt.x_history)
 b_history = history[:, 0]
 c_history = history[:, 1]
 

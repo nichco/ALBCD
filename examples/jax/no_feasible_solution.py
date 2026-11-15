@@ -6,8 +6,8 @@
 
 Block 1 owns x1 and block 2 owns x2. As in quadratic_global_failure.py, the coupling
 constraints are handed to both blocks as local constraints, with the other block's
-variable held fixed, so ALBCD runs only its BCD inner loop (unconstrained=True).
-With x2 fixed, block 1 can always satisfy both constraints (x1 >= 0.5 |x2|), but
+variable held fixed, and a plain cyclic block coordinate descent loop is written
+out below. With x2 fixed, block 1 can always satisfy both constraints (x1 >= 0.5 |x2|), but
 with x1 fixed, block 2 needs -2 x1 <= x2 <= 2 x1, which has no feasible solution
 when x1 < 0. From x0 = (1, 0.5), every block solve stays inside the wedge, where
 the constraints are inactive, so the iterates zigzag between the lines where each
@@ -22,116 +22,69 @@ import jax
 jax.config.update("jax_enable_x64", True) # jax defaults to float32
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
-from albcd import ALBCD, Subproblem
 import warnings
 warnings.filterwarnings("ignore")
 
 
-class Subproblem1(Subproblem):
-
-    def objective(self, v, other):
-        x1 = v[0]
-        x2 = other[0]
-        return jnp.squeeze(x1**2 + x2**2 - 1.5 * x1 * x2)
-
-    def local_constraints(self, v, other):
-        x1 = v[0]
-        x2 = other[0]
-        return jnp.array([x1 - 0.5 * x2, x1 + 0.5 * x2])
-
-    def solve(self, x, y, mu, data, outputs) -> None:
-        v0 = np.asarray(self.decompose(x), dtype=float)
-        other = jnp.asarray(self.other(x))
-
-        jax_obj = lambda v: self.objective(v, other)
-        jax_con = lambda v: self.local_constraints(v, other)
-
-        jaxprob = mo.JaxProblem(x0=v0, jax_obj=jax_obj, jax_con=jax_con, cl=0., cu=np.inf, order=1)
-
-        # a tight ftol: near the origin a block solve can only lower f by a tiny
-        # amount, which falls below a looser ftol before the residual reaches opt_tol
-        optimizer = mo.SLSQP(jaxprob, solver_options={'maxiter': 100, 'ftol': 1e-12}, turn_off_outputs=True)
-        optimizer.solve()
-        v_new = optimizer.results['x']
-
-        # Cache SLSQP's own converged multipliers and the constraint Jacobian at the
-        # solution, so gradient() can reuse them
-        self._multipliers = optimizer.results['multipliers']
-        self._jac_con = jax.jacobian(jax_con)(jnp.asarray(v_new))
-
-        outputs["x"] = self.recompose(x, v_new)
-
-    def gradient(self, x, y, mu, data) -> np.ndarray:
-
-        v = jnp.asarray(self.decompose(x))
-        other = jnp.asarray(self.other(x))
-        grad_f = jax.grad(self.objective)(v, other)
-
-        grad_f = np.asarray(grad_f)
-        jac_con = np.atleast_2d(np.asarray(self._jac_con))
-        multipliers = np.asarray(self._multipliers)
-        resid = grad_f - jac_con.T @ multipliers
-        return resid
+def f(x):
+    return x[0]**2 + x[1]**2 - 1.5 * x[0] * x[1]
 
 
-class Subproblem2(Subproblem):
-
-    def objective(self, v, other):
-        x2 = v[0]
-        x1 = other[0]
-        return jnp.squeeze(x1**2 + x2**2 - 1.5 * x1 * x2)
-
-    def local_constraints(self, v, other):
-        x2 = v[0]
-        x1 = other[0]
-        return jnp.array([x1 - 0.5 * x2, x1 + 0.5 * x2])
-
-    def solve(self, x, y, mu, data, outputs) -> None:
-        v0 = np.asarray(self.decompose(x), dtype=float)
-        other = jnp.asarray(self.other(x))
-
-        jax_obj = lambda v: self.objective(v, other)
-        jax_con = lambda v: self.local_constraints(v, other)
-
-        jaxprob = mo.JaxProblem(x0=v0, jax_obj=jax_obj, jax_con=jax_con, cl=0., cu=np.inf, order=1)
-
-        optimizer = mo.SLSQP(jaxprob, solver_options={'maxiter': 100, 'ftol': 1e-12}, turn_off_outputs=True)
-        optimizer.solve()
-        v_new = optimizer.results['x']
-
-        # Cache SLSQP's own converged multipliers and the constraint Jacobian at the
-        # solution, so gradient() can reuse them
-        self._multipliers = optimizer.results['multipliers']
-        self._jac_con = jax.jacobian(jax_con)(jnp.asarray(v_new))
-
-        outputs["x"] = self.recompose(x, v_new)
-
-    def gradient(self, x, y, mu, data) -> np.ndarray:
-
-        v = jnp.asarray(self.decompose(x))
-        other = jnp.asarray(self.other(x))
-        grad_f = jax.grad(self.objective)(v, other)
-
-        grad_f = np.asarray(grad_f)
-        jac_con = np.atleast_2d(np.asarray(self._jac_con))
-        multipliers = np.asarray(self._multipliers)
-        resid = grad_f - jac_con.T @ multipliers
-        return resid
+def con(x):
+    """
+    The two wedge constraints, con(x) >= 0.
+    """
+    return jnp.array([x[0] - 0.5 * x[1], x[0] + 0.5 * x[1]])
 
 
-opt = ALBCD(subproblems=[Subproblem1(index=slice(0, 1)),  # owns x1
-                         Subproblem2(index=slice(1, 2))], # owns x2
-            x0=np.array([1.0, 0.5]),
-            unconstrained=True,
-            opt_tol=1e-4,
-            max_inner_iter=100)
+def minimize_block(x, i):
+    """
+    Minimizes f over x[i] subject to con >= 0, with the other variable fixed.
+    Returns the new x[i] and SLSQP's multipliers.
+    """
+    xj = jnp.asarray(x)
+    put = lambda v: jnp.concatenate([xj[:i], v, xj[i+1:]])
+    prob = mo.JaxProblem(x0=x[i:i+1].copy(), jax_obj=lambda v: f(put(v)), jax_con=lambda v: con(put(v)),
+                         cl=0., cu=np.inf, order=1)
 
-opt.solve()
+    # a tight ftol: near the origin a block solve can only lower f by a tiny
+    # amount, which falls below a looser ftol before the residual reaches tol
+    optimizer = mo.SLSQP(prob, solver_options={'maxiter': 100, 'ftol': 1e-12}, turn_off_outputs=True)
+    optimizer.solve()
+    return optimizer.results['x'][0], optimizer.results['multipliers']
 
-print('Solution: ', opt.x)
+
+def stationarity(x, multipliers):
+    """
+    Each block's stationarity residual df/dx_i - (dcon/dx_i)^T lambda_i, with lambda_i from its last solve.
+    """
+    g = np.asarray(jax.grad(f)(x))
+    J = np.asarray(jax.jacobian(con)(x))
+    return np.array([g[i] - J[:, i] @ multipliers[i] for i in range(len(x))])
 
 
-history = np.array(opt.x_history)
+def bcd(x0, tol=1e-4, max_sweeps=100):
+    """
+    Cyclic block coordinate descent.
+    """
+    x = x0.copy()
+    history = [x.copy()]
+    multipliers = [None] * len(x)
+    for sweep in range(1, max_sweeps + 1):
+        for i in range(len(x)):
+            x[i], multipliers[i] = minimize_block(x, i)
+            history.append(x.copy())
+        res = np.max(np.abs(stationarity(x, multipliers)))
+        print(f'sweep {sweep:3d} | max stationarity residual {res:.3e}')
+        if res <= tol:
+            break
+    return np.array(history)
+
+
+history = bcd(np.array([1.0, 0.5]))
+
+print('Solution: ', history[-1])
+
 x1_history = history[:, 0]
 x2_history = history[:, 1]
 

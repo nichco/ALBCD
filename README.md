@@ -134,9 +134,7 @@ For a problem without coupling constraints, pass `unconstrained=True` and omit `
 The subproblems then set only `outputs["x"]` (no `"phi"`), and ALBCD reduces to
 block coordinate descent: each `opt_tol` phase runs up to `max_inner_iter` sweeps until the
 residual reaches that phase's tolerance, with no multiplier or penalty updates.
-Constraints local to a single block are still allowed. See
-[examples/powell.py](https://github.com/nichco/ALBCD/blob/main/examples/powell.py) and
-`2d_rosenbrock.py` (JAX and PyTorch).
+Constraints local to a single block are still allowed.
 
 ```python
 opt = ALBCD(subproblems, x0, unconstrained=True, opt_tol=1e-6, max_inner_iter=100)
@@ -157,9 +155,11 @@ See [examples/](https://github.com/nichco/ALBCD/tree/main/examples). Every probl
 | `quadratic_consensus_linear.py` | Same consensus setup as `quadratic_consensus_circle.py`, but each block handles the linear constraint `x1 - 0.5 x2 >= 0` locally. |
 | `rosenbrock_consensus.py` | Consensus form of the nonconvex Rosenbrock function. |
 | `proximal_rosenbrock_consensus.py` | Same problem as `rosenbrock_consensus.py`, with a proximal term added to each block's subproblem for stabilization. |
-| `2d_rosenbrock.py` | Unconstrained (`unconstrained=True`) two-dimensional Rosenbrock function with one variable per block: plain block coordinate descent zigzags along the valley to the minimum. |
+| `2d_rosenbrock.py` | Unconstrained two-dimensional Rosenbrock function with one variable per block: plain block coordinate descent zigzags along the valley to the minimum. |
 
-[powell.py](https://github.com/nichco/ALBCD/blob/main/examples/powell.py) is Powell's unconstrained example (`unconstrained=True`), on which block coordinate descent cycles around six vertices of a cube instead of converging. Each block's minimizer and residual are explicit, so it needs only NumPy and matplotlib.
+The plain BCD examples (`quadratic_global_failure.py`, `no_feasible_solution.py`, `2d_rosenbrock.py`, `wing_design.py` and `powell.py`) do not use ALBCD: each writes out a short block coordinate descent loop, so it runs on its own.
+
+[powell.py](https://github.com/nichco/ALBCD/blob/main/examples/powell.py) is Powell's unconstrained example, on which block coordinate descent cycles around six vertices of a cube instead of converging. Each block's minimizer and residual are explicit, so it needs only NumPy and matplotlib.
 
 Three larger examples solve engineering design optimization problems and compare against a monolithic reference:
 
