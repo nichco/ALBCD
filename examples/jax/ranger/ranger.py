@@ -36,8 +36,11 @@ def coupling(aero_loads, aero_loads_copy, weight, weight_copy):
     return jnp.concatenate([1e-3 * (aero_loads - aero_loads_copy), 1e-4 * jnp.reshape(weight - weight_copy, 1)])
 
 
-class SLSQPSubproblem(Subproblem):
-    """A block whose subproblem, min objective(v, *args) s.t. local_constraints(v), is solved with SLSQP.
+class SQPSubproblem(Subproblem):
+    """A block whose subproblem, min objective(v, *args) s.t. local_constraints(v), is solved with OpenSQP.
+
+    OpenSQP stops on the KKT residual of the subproblem rather than on the change in the objective, so a block
+    solved from a nearby warm start still reaches its tolerance instead of stopping after the first iteration.
 
     The functions are jitted once, in setup(), with the inputs that change between solves as arguments,
     so every solve reuses the same compiled VLM and frame models.
@@ -50,11 +53,11 @@ class SLSQPSubproblem(Subproblem):
     def args(self, x, y, mu, data):
         return tuple(jnp.asarray(a) for a in (self.other(x), y, mu, data[self.DATA]))
 
-    def slsqp(self, x, y, mu, data, cl=0.0, cu=0.0, xl=None, xu=None):
+    def sqp(self, x, y, mu, data, cl=0.0, cu=0.0, xl=None, xu=None):
         """This block's variables and constraint multipliers at the solution of its subproblem.
 
-        SLSQP minimizes objective(v, *args) + tau/2 ||X_SCALER * (v - v0)||^2, where the proximal term penalizes
-        the distance from the block's current values v0. It is measured in the scaled variables SLSQP sees, so
+        OpenSQP minimizes objective(v, *args) + tau/2 ||X_SCALER * (v - v0)||^2, where the proximal term penalizes
+        the distance from the block's current values v0. It is measured in the scaled variables OpenSQP sees, so
         the copies of the loads and weight (O(1e2-1e3) N) do not dominate the twist and thickness.
         """
         args = self.args(x, y, mu, data)
@@ -67,18 +70,24 @@ class SLSQPSubproblem(Subproblem):
                               con=lambda v: np.array(self.con(jnp.asarray(v))),
                               jac=lambda v: np.array(self.jac(jnp.asarray(v))),
                               xl=xl, xu=xu, x_scaler=self.X_SCALER, cl=cl, cu=cu, c_scaler=self.C_SCALER)
-        optimizer = mo.SLSQP(prob, solver_options={'maxiter': 1000, 'ftol': 1e-9}, turn_off_outputs=True)
+        # opt_tol 1e-8: tighter tolerances are out of reach for some solves, which then run to maxiter
+        optimizer = mo.OpenSQP(prob, maxiter=50, opt_tol=1e-8, feas_tol=1e-9, turn_off_outputs=True)
         optimizer.solve()
-        # SLSQP works in scaled variables and constraints
-        return optimizer.results['x'] / self.X_SCALER, np.asarray(optimizer.results['multipliers']) * self.C_SCALER
+        # OpenSQP works in scaled variables and constraints, and orders its multipliers as the equality
+        # constraints, the variable bounds, then the inequality constraints; the bound multipliers are dropped
+        pi = np.asarray(optimizer.results['pi'])
+        num_eq = np.sum(np.asarray(cl) == np.asarray(cu))
+        num_bounds = sum(0 if b is None else np.sum(np.isfinite(b)) for b in (xl, xu))
+        multipliers = np.concatenate([pi[:num_eq], pi[num_eq + num_bounds:]])
+        return optimizer.results['x'] / self.X_SCALER, multipliers * self.C_SCALER
 
     def gradient(self, x, y, mu, data):
-        """KKT stationarity residual with SLSQP's multipliers for the local constraint"""
+        """KKT stationarity residual with OpenSQP's multipliers for the local constraint"""
         v = jnp.asarray(self.decompose(x))
         return np.array(self.grad(v, *self.args(x, y, mu, data)) - self.jac(v).T @ self.multipliers)
 
 
-class AeroSubproblem(SLSQPSubproblem):
+class AeroSubproblem(SQPSubproblem):
     """Owns [twist_cp, weight_copy]: minimizes drag subject to lift = weight_copy."""
 
     DATA = "weight"
@@ -95,7 +104,7 @@ class AeroSubproblem(SLSQPSubproblem):
         return jnp.reshape(lift - v[-1], 1)
 
     def solve(self, x, y, mu, data, outputs):
-        v, self.multipliers = self.slsqp(x, y, mu, data)
+        v, self.multipliers = self.sqp(x, y, mu, data)
         CD, aero_loads, _ = aero_model(v[:-1])
         outputs["x"] = self.recompose(x, v)
         outputs["aero_loads"] = np.array(aero_loads)
@@ -103,14 +112,14 @@ class AeroSubproblem(SLSQPSubproblem):
         outputs["phi"] = np.array(coupling(aero_loads, x[LOADS], data["weight"], v[-1]))
 
 
-class StructSubproblem(SLSQPSubproblem):
+class StructSubproblem(SQPSubproblem):
     """Owns [thickness_cp, aero_loads_copy]: sizes the spar for stress and minimum gauge."""
 
     DATA = "aero_loads"
     X_SCALER = np.concatenate([np.full(num_cp_thickness, 1e2), np.full(2 * num_nodes, 1e-2)])
     C_SCALER = np.array([1e-2])
     # thickness bounds (m): the minimum gauge, active over most of the span at the solution, and the outer
-    # radius of the tube spar, which keeps SLSQP's iterates where the tube model is physical. The thickness
+    # radius of the tube spar, which keeps OpenSQP's iterates where the tube model is physical. The thickness
     # is a B-spline, a convex combination of its control points, so the bounds hold for every element.
     XL = np.concatenate([np.full(num_cp_thickness, min_gauge), np.full(2 * num_nodes, -np.inf)])
     XU = np.concatenate([np.full(num_cp_thickness, thickness_max), np.full(2 * num_nodes, np.inf)])
@@ -125,8 +134,8 @@ class StructSubproblem(SLSQPSubproblem):
         return jnp.reshape(max_sigma_mpa - sigma_yield_mpa, 1)
 
     def solve(self, x, y, mu, data, outputs):
-        v, multipliers = self.slsqp(x, y, mu, data, cl=np.full(1, -np.inf), cu=np.zeros(1), xl=self.XL, xu=self.XU)
-        # modopt hands SLSQP c(v) <= cu as cu - c(v) >= 0, so its multipliers have the opposite sign
+        v, multipliers = self.sqp(x, y, mu, data, cl=np.full(1, -np.inf), cu=np.zeros(1), xl=self.XL, xu=self.XU)
+        # OpenSQP treats c(v) <= cu as cu - c(v) >= 0, so its multipliers have the opposite sign
         self.multipliers = -multipliers
         _, weight = structures_model(v[num_cp_thickness:], v[:num_cp_thickness])
         outputs["x"] = self.recompose(x, v)
