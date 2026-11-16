@@ -67,7 +67,7 @@ class SLSQPSubproblem(Subproblem):
                               con=lambda v: np.array(self.con(jnp.asarray(v))),
                               jac=lambda v: np.array(self.jac(jnp.asarray(v))),
                               xl=xl, xu=xu, x_scaler=self.X_SCALER, cl=cl, cu=cu, c_scaler=self.C_SCALER)
-        optimizer = mo.SLSQP(prob, solver_options={'maxiter': 1000, 'ftol': 1e-8}, turn_off_outputs=True)
+        optimizer = mo.SLSQP(prob, solver_options={'maxiter': 1000, 'ftol': 1e-9}, turn_off_outputs=True)
         optimizer.solve()
         # SLSQP works in scaled variables and constraints
         return optimizer.results['x'] / self.X_SCALER, np.asarray(optimizer.results['multipliers']) * self.C_SCALER
