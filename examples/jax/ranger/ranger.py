@@ -9,7 +9,6 @@ import pyvista as pv
 from albcd import ALBCD, Subproblem
 import warnings
 warnings.filterwarnings("ignore")
-
 from jeometry.plotting import set_view
 from jvlm import panel_pressure
 from jvlm.viz import to_pyvista_mesh
@@ -20,7 +19,7 @@ from ranger_geometry_parameterization import twist_ffd
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
-# proximal coefficient of the ALBCD paper (Eq. 25) in both subproblems; 0 turns the proximal term off
+# proximal coefficient
 tau = 0.0
 
 # x = [twist_cp, weight_copy | thickness_cp, aero_loads_copy], the aero block's variables then the struct block's.
@@ -37,8 +36,7 @@ def coupling(aero_loads, aero_loads_copy, weight, weight_copy):
 
 
 class SQPSubproblem(Subproblem):
-    """A block whose subproblem, min objective(v, *args) s.t. local_constraints(v), is solved with OpenSQP.
-
+    """
     OpenSQP stops on the KKT residual of the subproblem rather than on the change in the objective, so a block
     solved from a nearby warm start still reaches its tolerance instead of stopping after the first iteration.
 
