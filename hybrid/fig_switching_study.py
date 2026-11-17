@@ -38,7 +38,7 @@ for i, label in enumerate(shown):
     bx.annotate(label, (s, (t_albcd + t_sqp)[list(sweeps).index(s)]), (s, top * (1.05 + 0.07 * i)), fontsize=7,
                 ha="center", arrowprops=dict(arrowstyle="-", color="0.5", lw=0.6))
 bx.set(xlabel="Switch after sweep", ylabel="Wall time (s)", ylim=(0, top * 1.5), title="Hybrid solve")
-bx.legend(frameon=False, loc="upper left", fontsize=8)
+bx.legend(frameon=False, loc="upper right", fontsize=8)
 bx.grid(color="0.92", axis="y")
 bx.set_axisbelow(True)
 fig.tight_layout()

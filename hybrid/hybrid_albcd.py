@@ -13,13 +13,16 @@ the solver that is called after every sweep (see the criteria at the end of this
 The solver needs both descriptions of the problem:
 
     subproblems   the blocks, exactly as for ALBCD (Subproblem.solve and Subproblem.gradient)
-    full_model    a function (x, y, data) -> modOpt problem, or -> (modOpt problem, init_multipliers)
+    full_model    a function (x, y, data) -> modOpt problem, or -> (modOpt problem, init_multipliers),
+                  or -> (modOpt problem, init_multipliers, init_hessian)
 
 ``full_model`` receives the phase-1 iterate (the design vector x, the multipliers y of the coupling
 constraints and the shared data) and returns the full problem as a modOpt problem whose x0 is the point
 that x maps to. The full problem can use its own variables, e.g. without the copies that the
 decomposition introduced. ``init_multipliers``, if returned, is OpenSQP's warm start for the multipliers:
-a dict of arrays 'cl', 'cu', 'xl', 'xu' in the scaled problem.
+a dict of arrays 'cl', 'cu', 'xl', 'xu' in the scaled problem. ``init_hessian``, if returned, is the matrix
+OpenSQP's BFGS approximation of the Lagrangian's Hessian starts from, instead of the identity: symmetric
+positive definite, in the scaled variables (see positive_definite()).
 """
 
 import time
@@ -30,15 +33,23 @@ from albcd import ALBCD
 
 class RecordingOpenSQP(mo.OpenSQP):
     """OpenSQP that keeps (wall time, x, optimality, feasibility, objective) at every major iteration;
-    iteration 0 is the starting point."""
+    iteration 0 is the starting point. The wall time starts t_model before solve(): the time it took to
+    evaluate the full model at the starting point (and its multipliers and Hessian, for a warm start)."""
+
+    t_model = 0.0
 
     def solve(self):
         self.history = []
+        # OpenSQP hands a matrix bfgs_init_lag_hess to its BFGS update, which only adopts it at the first
+        # update, so the first QP would still use the identity; start from the matrix right away
+        H0 = self.options["bfgs_init_lag_hess"]
+        if isinstance(H0, np.ndarray) and H0.ndim == 2:
+            self.QN.B_k = H0.copy()
         self.t_start = time.perf_counter()
         return super().solve()
 
     def update_outputs(self, **kwargs):
-        self.history.append((time.perf_counter() - self.t_start, np.array(kwargs["x"]), kwargs["opt"],
+        self.history.append((time.perf_counter() - self.t_start + self.t_model, np.array(kwargs["x"]), kwargs["opt"],
                              kwargs["feas"], kwargs["obj"]))
         super().update_outputs(**kwargs)
 
@@ -58,6 +69,16 @@ def init_multipliers(problem, lam):
     return {"cl": np.where(equality, lam, np.maximum(lam, 0.0)), "cu": np.maximum(-lam, 0.0),
             "xl": np.where(x <= problem.x_lower + tol, np.maximum(r, 0.0), 0.0),
             "xu": np.where(x >= problem.x_upper - tol, np.maximum(-r, 0.0), 0.0)}
+
+
+def positive_definite(H, floor=1e-6):
+    """The symmetric matrix H with its eigenvalues replaced by their absolute values, and those below
+    floor * (the largest) raised to it: a positive definite stand-in for an indefinite Lagrangian Hessian,
+    which OpenSQP's BFGS update and QP solver require."""
+    w, V = np.linalg.eigh(0.5 * (H + H.T))
+    w = np.abs(w)
+    H = (V * np.maximum(w, floor * w.max())) @ V.T
+    return 0.5 * (H + H.T)
 
 
 class HybridALBCD(ALBCD):
@@ -134,10 +155,13 @@ class HybridALBCD(ALBCD):
     # ------------------------------------------------------------------ phase 2: OpenSQP on the full problem
 
     def _monolithic(self):
+        t = time.perf_counter()
         model = self.full_model(self.x, self.y, self.data)
-        problem, init_multipliers = model if isinstance(model, tuple) else (model, None)
-        self.sqp = RecordingOpenSQP(problem, init_multipliers=init_multipliers, turn_off_outputs=True,
-                                    **self.sqp_options)
+        model = tuple(model) if isinstance(model, tuple) else (model,)
+        problem, init_multipliers, init_hessian = (model + (None, None))[:3]
+        self.sqp = RecordingOpenSQP(problem, init_multipliers=init_multipliers, bfgs_init_lag_hess=init_hessian,
+                                    turn_off_outputs=True, **self.sqp_options)
+        self.sqp.t_model = time.perf_counter() - t
         self.sqp.solve()
         self.z = self.sqp.results["x"] / problem.x_scaler
         self.success = bool(self.sqp.results["success"])

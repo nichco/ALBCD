@@ -1,0 +1,6 @@
+fleet_N4: phase 2 from ALBCD sweep k (merit_below(10) switches at sweep 20; ALBCD ends at 35)
+sweep  ALBCD s | identity: its       s | Hessian: its       s  setup s  ok
+    5     21.4 |            95    49.1 |            7     3.6      1.2  True/True
+   10     35.0 |            60    25.6 |            3     2.2      1.1  True/True
+   20     39.6 |            38    12.6 |            2     2.0      1.2  True/True
+   35     41.0 |            36    11.7 |            2     2.9      1.6  True/True

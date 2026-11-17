@@ -9,6 +9,7 @@ from there, to the tolerances in the example's SQP_OPTIONS.
 
     python switching_study.py ranger
     python switching_study.py fleet 4        (the number of flights)
+    python switching_study.py fleet 8 hessian   (phase 2 with the Hessian warm start; tag fleet_N8_hessian)
 
 Optional third argument: the spacing of the grid of sweeps (default 3). Writes
 switching_study_<problem>.npz and .txt, which fig_switching_study.py plots.
@@ -29,21 +30,32 @@ import numpy as np
 import hybrid_albcd as H
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+HESSIAN = "hessian" in sys.argv  # phase 2 with the Hessian warm start (the full model's warm_hessian)
+sys.argv = [a for a in sys.argv if a != "hessian"]
 name = sys.argv[1] if len(sys.argv) > 1 else "ranger"
 
 if name == "ranger":
     import ranger as problem
     tag = "ranger"
-    opt = problem.make_solver()
-    x_scale = np.concatenate([sp.X_SCALER for sp in opt.subproblems])
+    make_solver = problem.make_solver
+    x_scale = np.concatenate([problem.AeroSubproblem.X_SCALER, problem.StructSubproblem.X_SCALER])
 else:
     import airliner_fleet as problem
     N = int(sys.argv[2]) if len(sys.argv) > 2 else 4
     tag = f"fleet_N{N}"
-    opt = problem.make_solver(N)
+    make_solver = lambda **kwargs: problem.make_solver(N, **kwargs)
     x_scale = np.tile(problem.x_scaler, N)
 stride = int(sys.argv[3]) if len(sys.argv) > 3 else 3
+if HESSIAN:
+    tag += "_hessian"
 
+# a throwaway solve (one sweep, two OpenSQP iterations), so that no lazy import or compilation is timed
+scratch = make_solver(warm_hessian=True, verbose=False, max_outer_iter=1, max_inner_iter=1,
+                      sqp_options={**problem.SQP_OPTIONS, "maxiter": 2})
+problem.compile_models(scratch)
+scratch.solve()
+
+opt = make_solver(warm_hessian=HESSIAN)
 problem.compile_models(opt)
 x0, y0, data0 = opt.x.copy(), opt.y.copy(), dict(opt.data)
 
@@ -58,6 +70,7 @@ print(f"ALBCD: {K} sweeps, {h['time'][-1]:.1f} s, success {albcd_success}, optim
 
 # ---------------------------------------------------------------- the criteria, replayed on the history
 criteria = {
+    "after_sweeps(1)": H.after_sweeps(1),
     "after_sweeps(2)": H.after_sweeps(2),
     "after_sweeps(5)": H.after_sweeps(5),
     "after_sweeps(10)": H.after_sweeps(10),

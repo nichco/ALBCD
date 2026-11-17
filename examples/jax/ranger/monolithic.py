@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
 from matplotlib.cm import ScalarMappable
 import pyvista as pv
-from jeometry.plotting import set_view, sampled_mesh
+from jeometry.plotting import set_view, sampled_mesh, EDGE_COLOR
 from jvlm import panel_pressure
 from jvlm.viz import to_pyvista_mesh
 import warnings
@@ -166,10 +166,12 @@ undeflected = pv.lines_from_points(nodes[[0, -1]]).tube(radius=0.97 * d_tube / 2
 # the airframe without its wing, the propeller blades and wheels (OpenVSP names are "<id>, <component>, ...", so
 # the commas match whole component names), and the wing, twisted to the optimum like the vortex lattice
 gray_parts = [", prop,", ", gear,"]
-airframe, _ = sampled_mesh(ranger.declare_component(function_search_names=[""],
-                                                    ignore_names=["WingGeom"] + gray_parts), samples_per_span=8)
-prop_and_wheels, _ = sampled_mesh(ranger.declare_component(function_search_names=gray_parts), samples_per_span=8)
-wing, _ = sampled_mesh(twist_ffd.twisted_wing(twist_cp_star), samples_per_span=8)
+airframe, airframe_edges = sampled_mesh(ranger.declare_component(function_search_names=[""],
+                                                                 ignore_names=["WingGeom"] + gray_parts),
+                                        samples_per_span=8)
+prop_and_wheels, prop_and_wheels_edges = sampled_mesh(ranger.declare_component(function_search_names=gray_parts),
+                                                      samples_per_span=8)
+wing, wing_edges = sampled_mesh(twist_ffd.twisted_wing(twist_cp_star), samples_per_span=8)
 
 shaded = dict(smooth_shading=True, diffuse=0.7, ambient=0.3)
 plotter = pv.Plotter(off_screen=True, window_size=(2800, 1500))
@@ -179,6 +181,9 @@ plotter.enable_depth_peeling()  # sort the translucent surfaces correctly
 plotter.add_mesh(airframe, color="white", opacity=0.7, **shaded)
 plotter.add_mesh(prop_and_wheels, color="lightgray", opacity=0.7, **shaded)
 plotter.add_mesh(wing, color="white", opacity=0.25, **shaded)
+# the edges of the STEP surfaces, as in jeometry's Geometry.plot
+for edges in (airframe_edges, prop_and_wheels_edges, wing_edges):
+    plotter.add_mesh(edges, color=EDGE_COLOR, line_width=1.0, opacity=0.6, lighting=False)
 plotter.add_mesh(aero, scalars="Cp", cmap="Blues", clim=(cp_norm.vmin, cp_norm.vmax), show_edges=True,
                  edge_color="#6f6f6f", line_width=0.6, show_scalar_bar=False, lighting=False)
 plotter.add_mesh(skin, color="#f2f2f2", opacity=0.55, show_edges=True, edge_color="#9a9a9a", line_width=0.6,

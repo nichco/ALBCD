@@ -1,0 +1,59 @@
+fleet_N8_hessian: ALBCD alone 73 sweeps, 82.6 s (success True); OpenSQP to opt_tol 1e-06, feas_tol 1e-06
+best switch (of the sweeps tried): sweep 5, 81.1 s
+
+criterion                    sweep  ALBCD s SQP its    SQP s  total s  /best  ok
+after_sweeps(5)                  5     43.1       7     38.1     81.1   1.00  True
+step_below(1e-2)                 5     43.1       7     38.1     81.1   1.00  True
+stagnation(0.5)                  4     36.8       9     45.0     81.8   1.01  True
+after_sweeps(10)                10     68.0       3     17.5     85.5   1.05  True
+step_below(1e-3)                10     68.0       3     17.5     85.5   1.05  True
+merit_below(1000)                8     60.6       5     26.5     87.1   1.07  True
+feasibility_below(100)          11     70.3       3     16.9     87.2   1.07  True
+merit_below(100)                11     70.3       3     16.9     87.2   1.07  True
+multipliers_settled(0.01)       11     70.3       3     16.9     87.2   1.07  True
+feasibility_below(10)           14     72.7       4     15.0     87.8   1.08  True
+stagnation(0.7)                 15     73.3       4     15.1     88.3   1.09  True
+feasibility_below(1)            16     73.5       4     15.0     88.5   1.09  True
+step_below(1e-4)                13     72.4       5     18.3     90.7   1.12  True
+multipliers_settled(0.1)         7     55.2       6     35.6     90.8   1.12  True
+merit_below(10)                 19     74.4       4     19.6     94.0   1.16  True
+stagnation(0.9)                 19     74.4       4     19.6     94.0   1.16  True
+ALBCD to its tolerances         73     82.6       4     15.0     97.6   1.20  True
+multipliers_settled(0.5)         3     29.5      14     78.4    107.9   1.33  True
+after_sweeps(2)                  2     21.0      22    104.5    125.5   1.55  True
+after_sweeps(1)                  1     12.1      30    130.2    142.4   1.75  True
+monolithic (no ALBCD)            0      0.0      70    296.5    296.5   3.65  True
+
+all sweeps tried:
+sweep     merit  ALBCD s SQP its    SQP s  total s  ok
+    0       inf      0.0      70    296.5    296.5  True
+    1  8.53e+04     12.1      30    130.2    142.4  True
+    2  6.79e+04     21.0      22    104.5    125.5  True
+    3  4.02e+04     29.5      14     78.4    107.9  True
+    4  1.98e+04     36.8       9     45.0     81.8  True
+    5  1.32e+04     43.1       7     38.1     81.1  True
+    7  3.07e+03     55.2       6     35.6     90.8  True
+    8  7.07e+02     60.6       5     26.5     87.1  True
+   10  1.04e+02     68.0       3     17.5     85.5  True
+   11  7.78e+01     70.3       3     16.9     87.2  True
+   12  3.25e+01     71.3       5     25.5     96.8  True
+   13  2.25e+01     72.4       5     18.3     90.7  True
+   14  1.84e+01     72.7       4     15.0     87.8  True
+   15  1.49e+01     73.3       4     15.1     88.3  True
+   16  1.31e+01     73.5       4     15.0     88.5  True
+   19  9.63e+00     74.4       4     19.6     94.0  True
+   20  8.91e+00     74.6       4     19.9     94.5  True
+   24  6.50e+00     75.3       4     15.0     90.3  True
+   28  4.64e+00     76.0       4     15.0     91.0  True
+   32  3.23e+00     76.7       4     15.0     91.8  True
+   36  3.28e+00     77.5       4     15.0     92.5  True
+   40  3.35e+00     78.2       4     15.0     93.2  True
+   44  3.20e+00     78.9       4     19.7     98.6  True
+   48  3.21e+00     79.4       4     21.5    100.9  True
+   52  3.00e+00     80.0       4     22.4    102.5  True
+   56  2.66e+00     80.5       4     23.1    103.6  True
+   60  2.37e+00     81.0       4     17.7     98.7  True
+   64  1.95e+00     81.5       4     15.0     96.5  True
+   68  1.50e+00     82.0       4     15.0     97.0  True
+   72  1.23e+00     82.5       4     15.0     97.5  True
+   73  9.75e-01     82.6       4     15.0     97.6  True

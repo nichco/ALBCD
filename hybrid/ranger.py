@@ -25,7 +25,7 @@ RANGER = os.path.join(HERE, "..", "examples", "jax", "ranger")
 sys.path.insert(0, RANGER)  # models.py and ranger_geometry_parameterization.py
 
 from albcd import Subproblem
-from hybrid_albcd import HybridALBCD, init_multipliers, merit_below
+from hybrid_albcd import HybridALBCD, init_multipliers, merit_below, positive_definite
 from models import (aero_model, structures_model, twist_cp0, thickness_cp0, num_cp_twist, num_cp_thickness,
                     num_nodes, bspline_thickness, min_gauge, sigma_yield_mpa, thickness_max)
 
@@ -167,6 +167,8 @@ def full_constraints(z):
 
 _obj, _grad = jax.jit(full_objective), jax.jit(jax.grad(full_objective))
 _con, _jac = jax.jit(full_constraints), jax.jit(jax.jacrev(full_constraints))
+# Hessian of the scaled problem's Lagrangian, O_SCALER f - lam^T (C_SCALER c), in the unscaled variables
+_hess = jax.jit(jax.hessian(lambda z, lam: O_SCALER * full_objective(z) - lam @ (C_SCALER * full_constraints(z))))
 
 
 def full_problem(z0):
@@ -179,7 +181,7 @@ def full_problem(z0):
                           x_scaler=Z_SCALER, o_scaler=O_SCALER, c_scaler=C_SCALER)
 
 
-def make_full_model(warm_multipliers=True):
+def make_full_model(warm_multipliers=True, warm_hessian=False):
     """The full model in the form HybridALBCD takes: (x, y, data) -> (problem, init_multipliers).
 
     The copies are dropped: the full problem starts from the twist and thickness of the ALBCD iterate.
@@ -187,13 +189,22 @@ def make_full_model(warm_multipliers=True):
     constraint of the structures block and lift = weight_copy of the aero block), which the blocks share
     through ``data``. Both blocks minimize 1e2 CD plus coupling terms, the scaled objective of the full
     problem, so only the constraint scaling has to be applied.
+
+    With ``warm_hessian``, OpenSQP's BFGS matrix starts from the exact Hessian of the Lagrangian at the ALBCD
+    iterate, with those multipliers, made positive definite, instead of the identity.
     """
     def full_model(x, y, data):
         problem = full_problem(np.concatenate([x[TWIST], x[THICKNESS]]))
-        if not warm_multipliers or "stress_multiplier" not in data:
+        started = "stress_multiplier" in data  # False at the initial point, before any block solve
+        if not warm_multipliers or not (started or warm_hessian):
             return problem
-        lam = np.array([data["stress_multiplier"][0], data["lift_multiplier"][0]]) / C_SCALER
-        return problem, init_multipliers(problem, lam)
+        # at the initial point lam = 0, and the Hessian below is that of the objective
+        lam = np.array([data["stress_multiplier"][0], data["lift_multiplier"][0]]) / C_SCALER if started else np.zeros(2)
+        if not warm_hessian:
+            return problem, init_multipliers(problem, lam)
+        z = jnp.asarray(np.concatenate([x[TWIST], x[THICKNESS]]))
+        hessian = np.asarray(_hess(z, jnp.asarray(lam))) / np.outer(Z_SCALER, Z_SCALER)  # in the scaled variables
+        return problem, init_multipliers(problem, lam), positive_definite(hessian)
     return full_model
 
 
@@ -201,7 +212,7 @@ def make_full_model(warm_multipliers=True):
 SQP_OPTIONS = dict(maxiter=300, opt_tol=1e-6, feas_tol=1e-7)
 
 
-def make_solver(switch=None, warm_multipliers=True, verbose=True, **options):
+def make_solver(switch=None, warm_multipliers=True, warm_hessian=False, verbose=True, **options):
     """The hybrid solver with the ALBCD settings of examples/jax/ranger/ranger.py."""
     CD_init, aero_loads_init, _ = aero_model(twist_cp0)
     _, weight_init = structures_model(aero_loads_init, thickness_cp0)
@@ -210,7 +221,7 @@ def make_solver(switch=None, warm_multipliers=True, verbose=True, **options):
     settings.update(options)
     return HybridALBCD(
         subproblems=[AeroSubproblem(slice(0, THICKNESS.start)), StructSubproblem(slice(THICKNESS.start, None))],
-        full_model=make_full_model(warm_multipliers),
+        full_model=make_full_model(warm_multipliers, warm_hessian),
         x0=np.concatenate([twist_cp0, [float(weight_init)], thickness_cp0, np.array(aero_loads_init)]),
         mu0=np.full(2 * num_nodes + 1, 10.0),
         data0={"weight": float(weight_init), "aero_loads": np.array(aero_loads_init), "CD": float(CD_init)},
@@ -220,7 +231,11 @@ def make_solver(switch=None, warm_multipliers=True, verbose=True, **options):
 def compile_models(opt):
     """Run every jitted function once, so that compilation is not timed."""
     z0 = jnp.asarray(np.concatenate([opt.x[TWIST], opt.x[THICKNESS]]))
-    _obj(z0), _grad(z0), _con(z0), _jac(z0)
+    _obj(z0), _grad(z0), _con(z0), _jac(z0), _hess(z0, jnp.zeros(2))
+    # the blocks also call the models outside jit, which compiles each JAX primitive on first use
+    structures_model(aero_model(opt.x[TWIST])[1], opt.x[THICKNESS])
+    # the first evaluation of this solver's full model (and of its warm start) has a one-time cost as well
+    opt.full_model(opt.x, opt.y, opt.data)
     for sp in opt.subproblems:
         v = jnp.asarray(sp.decompose(opt.x))
         args = sp.args(opt.x, opt.y, opt.mu, opt.data)

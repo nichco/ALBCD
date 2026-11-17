@@ -32,7 +32,7 @@ FLEET = os.path.join(HERE, "..", "examples", "jax", "airliner_fleet")
 sys.path.insert(0, FLEET)  # models.py and the modules it imports
 
 from albcd import Subproblem
-from hybrid_albcd import HybridALBCD, init_multipliers, merit_below
+from hybrid_albcd import HybridALBCD, init_multipliers, merit_below, positive_definite
 from models import nvar, cl, cu, xl, xu, x_scaler, setup_flight, flight_outputs, initial_guess, last_call_cache
 
 taus = lambda x: x[nvar - 1::nvar]
@@ -43,6 +43,9 @@ outputs_fn = jax.jit(flight_outputs)
 jac_fn = jax.jit(jax.jacfwd(flight_outputs))
 outputs_all = jax.jit(jax.vmap(flight_outputs))
 jac_all = jax.jit(jax.vmap(jax.jacfwd(flight_outputs)))
+
+# Hessian of one flight's Lagrangian, fuel - lam^T (local constraints), for the full model's Hessian warm start
+hess_all = jax.jit(jax.vmap(jax.hessian(lambda v, fl, lam: jnp.append(-lam, 1.0) @ flight_outputs(v, fl))))
 
 # the local constraints with a lower side, an upper side, or both sides equal: the order of SLSQP's multipliers
 EQ = cl == cu
@@ -118,13 +121,17 @@ class FlightSubproblem(Subproblem):
 # full model: as in examples/jax/airliner_fleet/monolithic_opensqp.py
 # ---------------------------------------------------------------------------------------------
 
-def make_full_model(flights, T_budget, warm_multipliers=True):
+def make_full_model(flights, T_budget, warm_multipliers=True, warm_hessian=False):
     """The full model in the form HybridALBCD takes: (x, y, data) -> (problem, init_multipliers).
 
     The objective is the fleet's fuel, and the constraints are every flight's local constraints followed
     by the budget. All flights are simulated in one vectorized call, and the Jacobian is assembled from
     the flights' own Jacobians. The multipliers are warm started from ALBCD: the budget's from y, and the
     local constraints' from the multipliers of each flight's last block solve, shared through ``data``.
+
+    With ``warm_hessian``, OpenSQP's BFGS matrix starts from the exact Hessian of the Lagrangian at the ALBCD
+    iterate, with those multipliers, instead of the identity. The budget is linear, so the Hessian is block
+    diagonal, with one block per flight, each made positive definite on its own.
     """
     N = len(flights)
     fleet = jax.tree.map(lambda *arrays: jnp.stack(arrays), *flights)
@@ -146,13 +153,14 @@ def make_full_model(flights, T_budget, warm_multipliers=True):
                                  jac=jac,
                                  xl=np.tile(xl, N), xu=np.tile(xu, N), cl=np.append(np.tile(cl, N), 0.0),
                                  cu=np.append(np.tile(cu, N), 0.0), x_scaler=np.tile(x_scaler, N))
-        if not warm_multipliers or "multipliers_0" not in data:
+        started = "multipliers_0" in data  # False at the initial point, before any block solve
+        if not warm_multipliers or not (started or warm_hessian):
             return problem
         # SLSQP's multipliers (equalities, lower sides, upper sides, with grad f = J_eq^T m_eq + J_l^T m_l
         # - J_u^T m_u) as one signed multiplier per local constraint; the budget's is -y, since ALBCD's
         # Lagrangian is f + y phi
         lam = np.zeros(N * nc + 1)
-        for i in range(N):
+        for i in range(N if started else 0):
             m = data[f"multipliers_{i}"]
             local = np.zeros(nc)
             local[EQ] += m[:EQ.sum()]
@@ -160,7 +168,14 @@ def make_full_model(flights, T_budget, warm_multipliers=True):
             local[UPPER] -= m[EQ.sum() + LOWER.sum():]
             lam[i * nc:(i + 1) * nc] = local
         lam[-1] = -y[0]
-        return problem, init_multipliers(problem, lam)
+        # at the initial point lam = 0, and the Hessian below is that of the objective
+        if not warm_hessian:
+            return problem, init_multipliers(problem, lam)
+        blocks = np.asarray(hess_all(jnp.asarray(x).reshape(N, nvar), fleet, jnp.asarray(lam[:-1].reshape(N, nc))))
+        hessian = np.zeros((N * nvar, N * nvar))
+        for i, Hi in enumerate(blocks):  # in OpenSQP's scaled variables, x * x_scaler
+            hessian[i * nvar:(i + 1) * nvar, i * nvar:(i + 1) * nvar] = positive_definite(Hi / np.outer(x_scaler, x_scaler))
+        return problem, init_multipliers(problem, lam), hessian
     return full_model
 
 
@@ -168,14 +183,14 @@ def make_full_model(flights, T_budget, warm_multipliers=True):
 SQP_OPTIONS = dict(maxiter=1000, opt_tol=1e-6, feas_tol=1e-6)
 
 
-def make_solver(N, switch=None, warm_multipliers=True, verbose=True, **options):
+def make_solver(N, switch=None, warm_multipliers=True, warm_hessian=False, verbose=True, **options):
     """The hybrid solver with the ALBCD settings of examples/jax/airliner_fleet/airliner_fleet.py."""
     ranges, masses, flights, T_budget = make_fleet(N)
     settings = dict(max_mu=1e3, rho=2.0, tau=0.5, feas_tol=1e-4, opt_tol=1e-4, max_y=1e6, max_outer_iter=100,
                     max_inner_iter=20, sqp_options=SQP_OPTIONS, verbose=verbose)
     settings.update(options)
     opt = HybridALBCD(subproblems=[FlightSubproblem(i, flights, T_budget) for i in range(N)],
-                      full_model=make_full_model(flights, T_budget, warm_multipliers),
+                      full_model=make_full_model(flights, T_budget, warm_multipliers, warm_hessian),
                       x0=np.concatenate([initial_guess(fl) for fl in flights]),
                       mu0=np.array([0.01]),
                       switch=switch, **settings)
@@ -191,6 +206,9 @@ def compile_models(opt):
     z = jnp.asarray(opt.x)
     outputs_fn(z[:nvar], flights[0]), jac_fn(z[:nvar], flights[0])
     outputs_all(z.reshape(N, nvar), fleet), jac_all(z.reshape(N, nvar), fleet)
+    hess_all(z.reshape(N, nvar), fleet, jnp.zeros((N, nc)))
+    # the first evaluation of this solver's full model (and of its warm start) has a one-time cost as well
+    opt.full_model(opt.x, opt.y, opt.data)
 
 
 def report(opt):
