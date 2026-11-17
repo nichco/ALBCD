@@ -204,11 +204,11 @@ for ax, label in zip(axs, ['Optimality', 'Feasibility', r"$\log_{10}\Vert x - x^
 plt.tight_layout()
 plt.show()
 
-# the optimized (twisted) wing and its VLM mesh, colored by the pressure coefficient
+# the aircraft with the optimized (twisted) wing, and the wing's VLM mesh colored by the pressure coefficient
 out = solve_aero(vlm_mesh(twist_cp), v_inf, rho_atm, symmetry=False, with_viscous=False)
 cp = panel_pressure(out["mesh"], out["sec_forces"], out["normals"], orient="up") / q
 plotter = pv.Plotter()
-twist_ffd.twisted_wing(twist_cp).plot(color='silver', opacity=0.3, title='', plotter=plotter)
+twist_ffd.twisted_aircraft(twist_cp).plot(color='silver', opacity=0.3, title='', plotter=plotter)
 plotter.add_mesh(to_pyvista_mesh(out["mesh"], {"Cp": cp}), scalars="Cp", cmap="coolwarm", show_edges=True,
                  show_scalar_bar=False)
 set_view(plotter)

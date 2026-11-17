@@ -1,6 +1,8 @@
 """Wing VLM camber mesh and beam mesh of the Vashon Ranger R7, generated from its STEP geometry with jeometry, and
-an FFD parameterization of the wing's jig twist that updates both meshes. models.py imports ``twist_ffd``; run this
-file to plot the meshes at an example twist."""
+an FFD parameterization of the wing's jig twist that updates both meshes. ranger.stp holds the entire aircraft
+(fuselage, wing, tails, propeller and landing gear); the meshes and the FFD use only its wing, and
+``twist_ffd.twisted_aircraft`` puts the twisted wing back on the aircraft for plotting. models.py imports
+``twist_ffd``; run this file to plot the meshes on the aircraft at an example twist."""
 from pathlib import Path
 import numpy as np
 import jax
@@ -13,9 +15,10 @@ wing = ranger.declare_component(function_search_names=["WingGeom"], name="wing")
 num_spanwise, num_chordwise = 41, 12
 
 # region wing vlm
-# The wing is a straight, untwisted rectangle, so its leading (trailing) edge is the frontmost (rearmost) point of
-# its surface, repeated along the span. The camber surface lies midway between the upper and lower surfaces, found
-# by projecting the chord surface vertically onto the wing from above and below.
+# The wing is a straight, untwisted rectangle, set on the fuselage at a constant incidence of about 2 deg (nose up),
+# so its leading (trailing) edge is the frontmost (rearmost) point of its surface, repeated along the span. The
+# camber surface lies midway between the upper and lower surfaces, found by projecting the chord surface
+# vertically onto the wing from above and below; it carries the incidence, which the twist adds to.
 points = np.asarray(wing.evaluate(wing.generate_parametric_grid(100)))
 leading_edge = np.tile(points[points[:, 0].argmin()], (num_spanwise, 1))
 trailing_edge = np.tile(points[points[:, 0].argmax()], (num_spanwise, 1))
@@ -66,14 +69,16 @@ class WingTwistFFD:
     """
 
     def __init__(self, wing, camber_upper, camber_lower, beam_upper, beam_lower, camber_shape, num_twist_cp=7,
-                 num_sections=None):
+                 num_sections=None, aircraft=None):
         """The ``camber_*`` and ``beam_*`` arguments are the parametric coordinates (from ``wing.project``) of the
         camber surface's upper and lower points, ``camber_shape`` (chordwise, spanwise, 3) points in all, and of the
-        beam's. ``num_sections`` defaults to one section per beam node."""
+        beam's. ``num_sections`` defaults to one section per beam node. ``aircraft`` is the geometry the wing is a
+        component of (its functions keep their indices there), for ``twisted_aircraft``; by default, the wing."""
         mesh_coordinates = [camber_upper, camber_lower, beam_upper, beam_lower]
         num_sections = len(beam_upper) if num_sections is None else num_sections
         self.camber_shape = camber_shape
         self.wing = wing
+        self.aircraft = wing if aircraft is None else aircraft
         self.ffd_block = jg.construct_ffd_block_around_entities(wing, num_coefficients=(2, num_sections, 2),
                                                                 degree=(1, 1, 1))
         self.ffd_points = np.asarray(self.ffd_block.coefficients)  # (2, num_sections, 2, 3): x, span, z
@@ -109,6 +114,12 @@ class WingTwistFFD:
         twisted.set_coefficients(self.ffd_block.evaluate_ffd(self._twist(jnp.asarray(twist_cp, dtype=float))))
         return twisted
 
+    def twisted_aircraft(self, twist_cp):
+        """The entire aircraft with its wing twisted by ``twist_cp`` (radians); the other components are shared
+        with ``aircraft``, unchanged."""
+        functions = {**self.aircraft.functions, **self.twisted_wing(twist_cp).functions}
+        return jg.Geometry(functions, self.aircraft.function_names, name=self.aircraft.name)
+
     def _twist(self, twist_cp):
         """The FFD block's control points with its sections rotated by the twist."""
         sections = jg.SectionalParameterization(self.ffd_points, principal_parametric_dimension=1)
@@ -125,8 +136,11 @@ class WingTwistFFD:
 # endregion twist parameterization
 
 
-twist_ffd = WingTwistFFD(wing, camber_upper, camber_lower, beam_upper, beam_lower, chord_surface.shape)
+twist_ffd = WingTwistFFD(wing, camber_upper, camber_lower, beam_upper, beam_lower, chord_surface.shape,
+                         aircraft=ranger)
 
 if __name__ == "__main__":
-    twisted_camber_mesh, twisted_beam_mesh = twist_ffd(np.deg2rad([0., 2., 4., 6., 4., 2., 0.]))
-    ranger.plot_meshes([twisted_camber_mesh, twisted_beam_mesh], mesh_color="silver", mesh_opacity=0.4)
+    example_twist_cp = np.deg2rad([0., 2., 4., 6., 4., 2., 0.])
+    twisted_camber_mesh, twisted_beam_mesh = twist_ffd(example_twist_cp)
+    twist_ffd.twisted_aircraft(example_twist_cp).plot_meshes([twisted_camber_mesh, twisted_beam_mesh],
+                                                             mesh_color="silver", mesh_opacity=0.4)
