@@ -42,6 +42,24 @@ wing_beam_mesh = (wing.evaluate(beam_upper) + wing.evaluate(beam_lower)) / 2  # 
 wing_beam_height = jnp.linalg.norm(wing.evaluate(beam_upper) - wing.evaluate(beam_lower), axis=-1)  # (spanwise,)
 # endregion wing beam
 
+# region htail vlm
+# The horizontal tail is built like the wing: a straight, untwisted rectangle (at an incidence of about -1 deg), so
+# its camber surface comes from the same vertical projections of its chord surface. So far it is only plotted.
+htail = ranger.declare_component(function_search_names=["htail"], name="htail")
+htail_num_spanwise, htail_num_chordwise = 21, 12
+htail_points = np.asarray(htail.evaluate(htail.generate_parametric_grid(100)))
+htail_leading_edge = np.tile(htail_points[htail_points[:, 0].argmin()], (htail_num_spanwise, 1))
+htail_trailing_edge = np.tile(htail_points[htail_points[:, 0].argmax()], (htail_num_spanwise, 1))
+htail_leading_edge[:, 1] = htail_trailing_edge[:, 1] = np.linspace(htail_points[:, 1].min(), htail_points[:, 1].max(),
+                                                                   htail_num_spanwise)
+htail_chord_surface = np.linspace(htail_leading_edge, htail_trailing_edge, htail_num_chordwise)
+
+htail_camber_upper = htail.project(htail_chord_surface + up, direction=-up)  # parametric coordinates on the htail
+htail_camber_lower = htail.project(htail_chord_surface - up, direction=up)
+htail_camber_mesh = ((htail.evaluate(htail_camber_upper) + htail.evaluate(htail_camber_lower)) / 2
+                     ).reshape(htail_chord_surface.shape)  # (chordwise, spanwise, 3)
+# endregion htail vlm
+
 # The wing's faces are linear across each semispan, with control points only at its root and tip, so an FFD could
 # only twist them linearly. Insert knots spanwise, exactly (by linear interpolation), so that every face has a row
 # of control points at each VLM station of its semispan. The surface and its parametrization are unchanged, so the
@@ -142,5 +160,5 @@ twist_ffd = WingTwistFFD(wing, camber_upper, camber_lower, beam_upper, beam_lowe
 if __name__ == "__main__":
     example_twist_cp = np.deg2rad([0., 2., 4., 6., 4., 2., 0.])
     twisted_camber_mesh, twisted_beam_mesh = twist_ffd(example_twist_cp)
-    twist_ffd.twisted_aircraft(example_twist_cp).plot_meshes([twisted_camber_mesh, twisted_beam_mesh],
-                                                             mesh_color="silver", mesh_opacity=0.4)
+    twist_ffd.twisted_aircraft(example_twist_cp).plot_meshes(
+        [twisted_camber_mesh, twisted_beam_mesh, htail_camber_mesh], mesh_color="silver", mesh_opacity=0.4)

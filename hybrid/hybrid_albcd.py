@@ -37,9 +37,15 @@ class RecordingOpenSQP(mo.OpenSQP):
     evaluate the full model at the starting point (and its multipliers and Hessian, for a warm start)."""
 
     t_model = 0.0
+    # mid-run Hessian injection: at every major iteration k with inject(k) true, the BFGS matrix is replaced by
+    # hessian(z, lam), the exact Hessian of the Lagrangian at OpenSQP's current iterate z (unscaled) and
+    # multipliers lam (signed_multipliers), made positive definite, in the scaled variables
+    inject = None
+    hessian = None
 
     def solve(self):
         self.history = []
+        self.injected = []  # the iterations at which the Hessian was injected
         # OpenSQP hands a matrix bfgs_init_lag_hess to its BFGS update, which only adopts it at the first
         # update, so the first QP would still use the identity; start from the matrix right away
         H0 = self.options["bfgs_init_lag_hess"]
@@ -52,6 +58,12 @@ class RecordingOpenSQP(mo.OpenSQP):
         self.history.append((time.perf_counter() - self.t_start + self.t_model, np.array(kwargs["x"]), kwargs["opt"],
                              kwargs["feas"], kwargs["obj"]))
         super().update_outputs(**kwargs)
+        # the BFGS update of this iteration is done: the next QP uses QN.B_k, and the next update starts from QN.B.B
+        if self.inject is not None and self.inject(kwargs["major"]):
+            H = self.hessian(np.array(kwargs["x"]) / self.problem.x_scaler, signed_multipliers(self, kwargs["lag_mult"]))
+            self.QN.B.B, self.QN.B_k = H.copy(), H.copy()
+            self.QN.B.first_iteration = False
+            self.injected.append(kwargs["major"])
 
 
 def init_multipliers(problem, lam):
@@ -69,6 +81,19 @@ def init_multipliers(problem, lam):
     return {"cl": np.where(equality, lam, np.maximum(lam, 0.0)), "cu": np.maximum(-lam, 0.0),
             "xl": np.where(x <= problem.x_lower + tol, np.maximum(r, 0.0), 0.0),
             "xu": np.where(x >= problem.x_upper - tol, np.maximum(-r, 0.0), 0.0)}
+
+
+def signed_multipliers(sqp, pi):
+    """OpenSQP's multipliers pi (equalities, variable bounds, lower then upper sides of the inequalities, all
+    in the scaled problem) as one signed multiplier per constraint of the problem, so that the Lagrangian of
+    the scaled problem is f - lam^T c."""
+    lam = np.zeros(len(sqp.problem.c_lower))
+    ne, nb = len(sqp.eq_constraint_indices), sqp.nc_b
+    nl = len(sqp.lower_constraint_indices)
+    lam[sqp.eq_constraint_indices] = pi[:ne]
+    lam[sqp.lower_constraint_indices] += pi[ne + nb:ne + nb + nl]
+    lam[sqp.upper_constraint_indices] -= pi[ne + nb + nl:]
+    return lam
 
 
 def positive_definite(H, floor=1e-6):

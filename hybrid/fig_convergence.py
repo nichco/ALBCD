@@ -26,6 +26,7 @@ titles = {"ranger": "Aerostructural problem"}
 # run: (label, color, line style)
 RUNS = {"albcd": ("ALBCD", "tab:blue", "-"),
         "monolithic": ("Monolithic (OpenSQP)", "tab:red", "-"),
+        "monolithic_injection": ("Monolithic, exact Hessian injected", "tab:purple", "-"),
         "hybrid": ("Hybrid ALBCD", "k", "-"),
         "hybrid_hessian": ("Hybrid ALBCD, Hessian warm start", "tab:green", "-")}
 ROWS = [("optimality", "Optimality"), ("feasibility", "Feasibility"), ("distance", r"$\Vert z - z^*\Vert$")]
@@ -37,6 +38,15 @@ for col, tag in enumerate(tags):
     distance_file = os.path.join(HERE, f"distance_{tag}.npz")
     if os.path.exists(distance_file):
         d.update(np.load(distance_file))
+    # monolithic OpenSQP with the exact Hessian injected partway (hessian_injection.py): the fastest run of its sweep
+    injection_file = os.path.join(HERE, f"injection_{tag}.npz")
+    if os.path.exists(injection_file):
+        inj = np.load(injection_file)
+        k = int(inj["best"])
+        for key in ("time", "optimality", "feasibility", "distance"):
+            d[f"monolithic_injection_{key}"] = inj[f"{key}_{k}"]
+        d["monolithic_injection_injected"] = inj[f"injected_{k}"]
+        d["monolithic_injection_label"] = (f"every {int(inj['period'])} iterations" if k < 0 else f"at iteration {k}")
     runs = [run for run in RUNS if f"{run}_time" in d]
     t_max = max(d[f"{run}_time"][-1] for run in runs)
     for row, (key, ylabel) in enumerate(ROWS):
@@ -45,9 +55,18 @@ for col, tag in enumerate(tags):
             if f"{run}_{key}" not in d:
                 continue
             label, color, ls = RUNS[run]
+            if run == "monolithic_injection" and col == 0:
+                label += " (best of sweep)"
             t, v = d[f"{run}_time"], np.maximum(d[f"{run}_{key}"], floor)
             ax.semilogy(t, v, color=color, ls=ls, lw=1.5, label=label, zorder=3 if run.startswith("hybrid") else 2)
             ax.plot(t[-1], v[-1], "o", color=color, ms=4, zorder=4)
+            if run == "monolithic_injection":  # where the Hessian was injected
+                j = d[f"{run}_injected"].astype(int)
+                ax.plot(t[j], v[j], "s", color=color, ms=5, mfc="w", zorder=5,
+                        label="Hessian injected" if col == 0 else None)
+                if row == 0:
+                    ax.annotate(f"injected {str(d[f'{run}_label'])}", (t[j[0]], v[j[0]]), xytext=(4, 6),
+                                textcoords="offset points", fontsize=7, color=color)
             if run.startswith("hybrid"):  # where the hybrid hands over to OpenSQP
                 k = int(d[f"{run}_switch_sweep"])
                 ax.plot(t[k], v[k], "D", color=color, ms=6, mfc="w", zorder=5,

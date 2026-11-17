@@ -145,6 +145,15 @@ def make_full_model(flights, T_budget, warm_multipliers=True, warm_hessian=False
         J[-1, nvar - 1::nvar] = 1.0  # the budget
         return J
 
+    def hessian(z, lam):
+        """Exact Hessian of the Lagrangian, fuel - lam^T c, in the scaled variables, made positive definite. The
+        budget is linear, so it is block diagonal, one block per flight, each made positive definite on its own."""
+        blocks = np.asarray(hess_all(jnp.asarray(z).reshape(N, nvar), fleet, jnp.asarray(lam[:-1].reshape(N, nc))))
+        H = np.zeros((N * nvar, N * nvar))
+        for i, Hi in enumerate(blocks):  # in OpenSQP's scaled variables, z * x_scaler
+            H[i * nvar:(i + 1) * nvar, i * nvar:(i + 1) * nvar] = positive_definite(Hi / np.outer(x_scaler, x_scaler))
+        return H
+
     def full_model(x, y, data):
         problem = mo.ProblemLite(x0=np.array(x),
                                  obj=lambda z: np.sum(out(z)[:, -1]),
@@ -171,11 +180,8 @@ def make_full_model(flights, T_budget, warm_multipliers=True, warm_hessian=False
         # at the initial point lam = 0, and the Hessian below is that of the objective
         if not warm_hessian:
             return problem, init_multipliers(problem, lam)
-        blocks = np.asarray(hess_all(jnp.asarray(x).reshape(N, nvar), fleet, jnp.asarray(lam[:-1].reshape(N, nc))))
-        hessian = np.zeros((N * nvar, N * nvar))
-        for i, Hi in enumerate(blocks):  # in OpenSQP's scaled variables, x * x_scaler
-            hessian[i * nvar:(i + 1) * nvar, i * nvar:(i + 1) * nvar] = positive_definite(Hi / np.outer(x_scaler, x_scaler))
-        return problem, init_multipliers(problem, lam), hessian
+        return problem, init_multipliers(problem, lam), hessian(x, lam)
+    full_model.hessian = hessian  # for a mid-run Hessian injection (RecordingOpenSQP.hessian)
     return full_model
 
 

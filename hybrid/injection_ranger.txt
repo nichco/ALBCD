@@ -1,0 +1,13 @@
+ranger: monolithic OpenSQP with the exact Hessian injected at iteration k (best: k = 1)
+  no injection: 33 its, 3.1 s; hybrid with Hessian warm start: 11.8 s (from convergence_runs.py, an earlier run)
+        k   its   time s  ok
+        1    18      2.6  True
+        2    19      2.6  True
+        3    21      3.0  True
+        4    22      3.0  True
+        6    24      3.2  True
+        8    26      3.4  True
+       10    26      3.9  True
+       15    23      2.8  True
+       20    23      2.8  True
+       25    27      3.2  True

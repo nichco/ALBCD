@@ -1,0 +1,14 @@
+fleet_N8: monolithic OpenSQP with the exact Hessian injected at iteration k (best: k = 5)
+  no injection: 136 its, 382.9 s; hybrid with Hessian warm start: 91.6 s (from convergence_runs.py, an earlier run)
+        k   its   time s  ok
+        1    37    131.8  True
+        2    33    121.8  True
+        3    29     99.4  True
+        5    20     55.4  True
+       10    23     57.4  True
+       20    30     75.2  True
+       30    38     92.9  True
+       40    47    129.6  True
+       60    65    170.5  True
+       80    86    240.4  True
+ every 10    21     55.6  True

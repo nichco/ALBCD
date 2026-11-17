@@ -193,6 +193,10 @@ def make_full_model(warm_multipliers=True, warm_hessian=False):
     With ``warm_hessian``, OpenSQP's BFGS matrix starts from the exact Hessian of the Lagrangian at the ALBCD
     iterate, with those multipliers, made positive definite, instead of the identity.
     """
+    def hessian(z, lam):
+        """Exact Hessian of the scaled problem's Lagrangian in the scaled variables, made positive definite."""
+        return positive_definite(np.asarray(_hess(jnp.asarray(z), jnp.asarray(lam))) / np.outer(Z_SCALER, Z_SCALER))
+
     def full_model(x, y, data):
         problem = full_problem(np.concatenate([x[TWIST], x[THICKNESS]]))
         started = "stress_multiplier" in data  # False at the initial point, before any block solve
@@ -202,9 +206,8 @@ def make_full_model(warm_multipliers=True, warm_hessian=False):
         lam = np.array([data["stress_multiplier"][0], data["lift_multiplier"][0]]) / C_SCALER if started else np.zeros(2)
         if not warm_hessian:
             return problem, init_multipliers(problem, lam)
-        z = jnp.asarray(np.concatenate([x[TWIST], x[THICKNESS]]))
-        hessian = np.asarray(_hess(z, jnp.asarray(lam))) / np.outer(Z_SCALER, Z_SCALER)  # in the scaled variables
-        return problem, init_multipliers(problem, lam), positive_definite(hessian)
+        return problem, init_multipliers(problem, lam), hessian(np.concatenate([x[TWIST], x[THICKNESS]]), lam)
+    full_model.hessian = hessian  # for a mid-run Hessian injection (RecordingOpenSQP.hessian)
     return full_model
 
 
