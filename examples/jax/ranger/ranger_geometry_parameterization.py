@@ -154,11 +154,63 @@ class WingTwistFFD:
 # endregion twist parameterization
 
 
+# region htail pitch
+class HtailPitch:
+    """The horizontal tail pitched rigidly about its leading edge, as an all-moving elevator: pitch angle in, htail
+    VLM camber mesh out.
+
+    The htail rotates about the spanwise line through its leading edge by ``pitch`` (radians), positive nose up
+    (trailing edge down, the sign of a positive elevator deflection), on top of its built-in incidence. A B-spline
+    surface rotates with its control points, so the camber mesh, evaluated at fixed parametric coordinates on the
+    htail, rotates with them exactly: a call rotates the unpitched mesh, compiled with ``jax.jit`` and
+    differentiable in the pitch.
+    """
+
+    def __init__(self, htail, camber_upper, camber_lower, camber_shape, hinge_point, aircraft=None):
+        """The ``camber_*`` arguments are the parametric coordinates (from ``htail.project``) of the camber surface's
+        upper and lower points, ``camber_shape`` (chordwise, spanwise, 3) points in all; ``hinge_point`` is a point on
+        the leading edge. ``aircraft`` is the geometry the htail is a component of, for ``pitched_aircraft``; by
+        default, the htail."""
+        self.htail = htail
+        self.aircraft = htail if aircraft is None else aircraft
+        self.hinge_point = np.asarray(hinge_point, dtype=float)
+        self.hinge_axis = np.array([0., 1., 0.])
+        self.camber_mesh = ((htail.evaluate(camber_upper) + htail.evaluate(camber_lower)) / 2).reshape(camber_shape)
+        self._evaluate = jax.jit(self._mesh)
+
+    def __call__(self, pitch):
+        """The htail camber mesh (chordwise, spanwise, 3) pitched by ``pitch`` (radians)."""
+        return self._evaluate(jnp.asarray(pitch, dtype=float))
+
+    def pitched_htail(self, pitch):
+        """The htail geometry pitched by ``pitch`` (radians)."""
+        pitched = self.htail.copy()
+        pitched.rotate(self.hinge_point, self.hinge_axis, pitch)
+        return pitched
+
+    def pitched_aircraft(self, pitch, aircraft=None):
+        """The entire aircraft (``aircraft``, by default the one given at construction, e.g. a twisted aircraft from
+        ``twist_ffd.twisted_aircraft``) with its htail pitched by ``pitch`` (radians); the other components are
+        shared with it, unchanged."""
+        aircraft = self.aircraft if aircraft is None else aircraft
+        functions = {**aircraft.functions, **self.pitched_htail(pitch).functions}
+        return jg.Geometry(functions, aircraft.function_names, name=aircraft.name)
+
+    def _mesh(self, pitch):
+        return jg.rotate(self.camber_mesh, self.hinge_point, self.hinge_axis, pitch)
+# endregion htail pitch
+
+
 twist_ffd = WingTwistFFD(wing, camber_upper, camber_lower, beam_upper, beam_lower, chord_surface.shape,
                          aircraft=ranger)
+htail_pitch = HtailPitch(htail, htail_camber_upper, htail_camber_lower, htail_chord_surface.shape,
+                         htail_leading_edge[0], aircraft=ranger)
 
 if __name__ == "__main__":
     example_twist_cp = np.deg2rad([0., 2., 4., 6., 4., 2., 0.])
+    example_pitch = np.deg2rad(10.)  # htail nose up (trailing edge down)
     twisted_camber_mesh, twisted_beam_mesh = twist_ffd(example_twist_cp)
-    twist_ffd.twisted_aircraft(example_twist_cp).plot_meshes(
-        [twisted_camber_mesh, twisted_beam_mesh, htail_camber_mesh], mesh_color="silver", mesh_opacity=0.4)
+    pitched_htail_camber_mesh = htail_pitch(example_pitch)
+    aircraft = htail_pitch.pitched_aircraft(example_pitch, twist_ffd.twisted_aircraft(example_twist_cp))
+    aircraft.plot_meshes([twisted_camber_mesh, twisted_beam_mesh, pitched_htail_camber_mesh], mesh_color="silver",
+                         mesh_opacity=0.4)
