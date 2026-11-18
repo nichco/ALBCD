@@ -1,0 +1,24 @@
+
+	Solution from Scipy SLSQP:
+	----------------------------------------------------------------------------------------------------
+	Problem                  : unnamed_problem
+	Solver                   : scipy-slsqp
+	Success                  : True
+	Message                  : Optimization terminated successfully
+	Status                   : 0
+	Total time               : 1321.6686952114105
+	Objective                : 39.06382807567983
+	Gradient norm            : 2.2565424926722564
+	Total function evals     : 188
+	Total gradient evals     : 187
+	Major iterations         : 187
+	Total callbacks          : 751
+	Reused callbacks         : 0
+	obj callbacks            : 188
+	grad callbacks           : 187
+	hess callbacks           : 0
+	con callbacks            : 189
+	jac callbacks            : 187
+	----------------------------------------------------------------------------------------------------
+fuel tight 39063.828076 kg, example reference 39063.828080 kg, difference -4.241e-06 kg; cost index 0.45610933 vs 0.45610945; ||z - z_ref|| (scaled) 1.477e-03
+time 1321.7 s, nit 187, success True

@@ -1,0 +1,15 @@
+Ranger (tight reference KKT stationarity 2.68e-09; albcd time limit for the others: 441 s)
+configuration  success     theta    |x-x*| sweeps solves  acc  rej  t(1e-4) tp(1e-4) sw(1e-4)  t(1e-8) tp(1e-8) sw(1e-8)   total  status
+----------------------------------------------------------------------------------------------------------------------------------------
+albcd             True  8.44e-05  1.17e-04     62    124    0    0    146.9    143.5       62        -        -        -   147.0  converged
+albcd_tight       True  7.47e-10  3.41e-08    250    500    0    0    110.7    108.3       45    188.5    180.0      155   320.3  converged
+v1                True  9.06e-09  2.63e-07    133    266    0    0    133.9    130.1       61    239.8    231.3      133   239.8  kkt_tol
+v2                True  5.21e-09  4.03e-08     27     54   19    7     32.2     31.5       10     93.4     91.5       27    93.4  kkt_tol
+v3                True  5.21e-09  4.03e-08     27     54   19    7     31.9     31.2       10     95.4     93.2       27    95.4  kkt_tol
+v3_mu_lo          True  1.03e-09  1.06e-09      9     18    6    5     24.4     23.8        8     26.5     25.7        9    26.5  kkt_tol
+v3_mu_hi         False  1.32e-05  1.65e-05     98    196   96    4    132.4    127.2       72        -        -        -   209.2  max_outer_iter
+v3_outer          True  6.88e-09  2.34e-08     21     42   16    6     22.8     22.2        9     36.5     35.1       21    36.5  kkt_tol
+v3_harvest        True  5.37e-09  7.93e-09     31     62   27    8     46.8     45.7       14     79.9     77.4       31    79.9  kkt_tol
+v3_norefine       True  5.27e-09  2.10e-08     46     92   34   16     79.9     77.7       27    101.2     97.5       46   101.2  kkt_tol
+
+theta: final KKT measure (plan sec. 1.6); |x-x*|: scaled distance to the tight reference; t/tp/sw(level): wall time, critical-path time and sweeps to the first event with theta <= level; total: wall time (s).

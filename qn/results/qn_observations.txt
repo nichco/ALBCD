@@ -1,0 +1,165 @@
+== Airliner N = 4 ==
+v1: max_outer_iter (ALBCD tolerances met)
+  mu max: 0.01 -> 0.01; mu_growth events 0; dual_fallback 98, first_order 2
+v2: kkt_tol
+  steps 12: accepted 8 (67%), rejected 4 {np.str_('sign'): 3, np.str_('theta'): 1}
+  last 5 accepted: theta 3.70e-08, 3.79e-08, 2.33e-08, 1.44e-08, 1.81e-08
+    step contraction theta_trial/theta_before: 0.219, 0.619, 0.371, 0.580, 0.777
+    successive accepted theta ratio: 1.024, 0.616, 0.619, 1.251
+  cond(K) max over blocks: 3.2e+04 .. 2.4e+06
+  rejections after the first acceptance: 1 (theta@1.3e-07)
+  mu max: 0.01 -> 0.01; mu_growth events 0; dual_fallback 4, first_order 0
+  sweeps that raised theta: 7 of 13 (largest factor 2.3)
+v3: kkt_tol
+  steps 12: accepted 9 (75%), rejected 3 {np.str_('sign'): 3}
+  last 5 accepted: theta 1.57e-07, 4.90e-08, 3.21e-08, 2.66e-08, 9.19e-09
+    step contraction theta_trial/theta_before: 0.788, 0.777, 0.474, 0.605, 0.548
+    successive accepted theta ratio: 0.312, 0.655, 0.828, 0.345
+  first skipped sweep after event 10 (sweep 4, theta 7.79e-07); skipped sweeps: 1
+  cond(K) max over blocks: 3.2e+04 .. 2.4e+06
+  rejections after the first acceptance: 0 ()
+  mu max: 0.01 -> 0.01; mu_growth events 0; dual_fallback 3, first_order 0
+  sweeps that raised theta: 5 of 11 (largest factor 5)
+v3_mu_lo: kkt_tol
+  steps 16: accepted 10 (62%), rejected 6 {np.str_('sign'): 3, np.str_('theta'): 3}
+  last 5 accepted: theta 1.03e-07, 2.58e-08, 2.62e-08, 1.14e-08, 8.30e-09
+    step contraction theta_trial/theta_before: 0.856, 0.542, 0.860, 0.531, 0.639
+    successive accepted theta ratio: 0.250, 1.016, 0.433, 0.731
+  first skipped sweep after event 10 (sweep 4, theta 1.78e-06); skipped sweeps: 2
+  cond(K) max over blocks: 5.0e+04 .. 1.6e+06
+  rejections after the first acceptance: 3 (theta@3.5e-07, theta@9.5e-08, theta@7.0e-08)
+  mu max: 0.001 -> 0.001; mu_growth events 0; dual_fallback 6, first_order 0
+  sweeps that raised theta: 5 of 14 (largest factor 3.5)
+v3_mu_hi: kkt_tol
+  steps 15: accepted 9 (60%), rejected 6 {np.str_('sign'): 3, np.str_('theta'): 3}
+  last 5 accepted: theta 6.42e-08, 1.97e-07, 2.69e-08, 1.37e-08, 6.78e-09
+    step contraction theta_trial/theta_before: 0.046, 0.404, 0.152, 0.107, 0.106
+    successive accepted theta ratio: 3.069, 0.137, 0.508, 0.496
+  first skipped sweep after event 10 (sweep 4, theta 2.28e-05); skipped sweeps: 5
+  cond(K) max over blocks: 2.3e+04 .. 3.5e+05
+  rejections after the first acceptance: 3 (theta@2.0e-07, theta@2.5e-08, theta@1.7e-08)
+  mu max: 0.1 -> 0.1; mu_growth events 0; dual_fallback 6, first_order 0
+  sweeps that raised theta: 1 of 10 (largest factor 5.1)
+v3_outer: kkt_tol
+  steps 47: accepted 29 (62%), rejected 18 {np.str_('sign'): 5, np.str_('theta'): 13}
+  last 5 accepted: theta 1.79e-08, 2.31e-08, 1.95e-08, 1.01e-08, 6.51e-09
+    step contraction theta_trial/theta_before: 0.083, 0.051, 0.843, 0.046, 0.043
+    successive accepted theta ratio: 1.291, 0.843, 0.517, 0.646
+  first skipped sweep after event 17 (sweep 6, theta 1.91e-06); skipped sweeps: 21
+  cond(K) max over blocks: 2.9e+04 .. 4.5e+07
+  rejections after the first acceptance: 13 (theta@3.6e-07, theta@1.0e-07, theta@8.2e-08, theta@6.3e-08, theta@7.1e-08, theta@8.1e-08, theta@4.8e-08, theta@4.2e-08)
+  mu max: 0.01 -> 0.02; mu_growth events 1; dual_fallback 18, first_order 0
+  sweeps that raised theta: 7 of 26 (largest factor 24)
+v3_harvest: max_outer_iter
+  steps 100: accepted 8 (8%), rejected 92 {np.str_('sign'): 3, np.str_('theta'): 89}
+  last 5 accepted: theta 1.33e-07, 1.96e-07, 3.72e-08, 5.10e-08, 5.14e-08
+    step contraction theta_trial/theta_before: 0.210, 0.472, 0.148, 0.674, 0.468
+    successive accepted theta ratio: 1.477, 0.190, 1.372, 1.007
+  first skipped sweep after event 10 (sweep 4, theta 4.30e-06); skipped sweeps: 3
+  cond(K) max over blocks: 3.2e+04 .. 2.4e+06
+  rejections after the first acceptance: 89 (theta@5.1e-08, theta@8.0e-08, theta@8.0e-08, theta@8.0e-08, theta@8.0e-08, theta@8.0e-08, theta@8.0e-08, theta@8.0e-08)
+  mu max: 0.01 -> 0.01; mu_growth events 0; dual_fallback 92, first_order 0
+  sweeps that raised theta: 4 of 97 (largest factor 3.1)
+v3_norefine: kkt_tol
+  steps 18: accepted 13 (72%), rejected 5 {np.str_('sign'): 2, np.str_('theta'): 3}
+  last 5 accepted: theta 2.88e-08, 2.82e-08, 2.38e-08, 1.03e-08, 5.25e-09
+    step contraction theta_trial/theta_before: 0.346, 0.462, 0.563, 0.393, 0.307
+    successive accepted theta ratio: 0.980, 0.845, 0.430, 0.512
+  first skipped sweep after event 7 (sweep 3, theta 4.98e-05); skipped sweeps: 1
+  cond(K) max over blocks: 2.8e+04 .. 2.4e+06
+  rejections after the first acceptance: 3 (theta@2.2e-07, theta@2.3e-07, theta@2.3e-08)
+  mu max: 0.01 -> 0.01; mu_growth events 0; dual_fallback 5, first_order 0
+  sweeps that raised theta: 8 of 17 (largest factor 2.1)
+
+== Airliner N = 8 ==
+v2: kkt_tol
+  steps 12: accepted 7 (58%), rejected 5 {np.str_('sign'): 3, np.str_('theta'): 2}
+  last 5 accepted: theta 1.48e-07, 1.87e-07, 8.13e-08, 2.12e-08, 1.30e-08
+    step contraction theta_trial/theta_before: 0.315, 0.631, 0.485, 0.358, 0.361
+    successive accepted theta ratio: 1.263, 0.434, 0.261, 0.613
+  cond(K) max over blocks: 2.9e+04 .. 1.4e+06
+  rejections after the first acceptance: 2 (theta@1.0e-07, theta@3.1e-08)
+  mu max: 0.01 -> 0.01; mu_growth events 0; dual_fallback 5, first_order 0
+  sweeps that raised theta: 4 of 13 (largest factor 2)
+v3: kkt_tol
+  steps 13: accepted 8 (62%), rejected 5 {np.str_('sign'): 3, np.str_('theta'): 2}
+  last 5 accepted: theta 1.37e-07, 6.93e-08, 5.37e-08, 1.41e-08, 9.49e-09
+    step contraction theta_trial/theta_before: 0.542, 0.828, 0.507, 0.240, 0.521
+    successive accepted theta ratio: 0.507, 0.774, 0.264, 0.671
+  first skipped sweep after event 10 (sweep 4, theta 8.60e-07); skipped sweeps: 1
+  cond(K) max over blocks: 2.9e+04 .. 1.4e+06
+  rejections after the first acceptance: 2 (theta@1.2e-07, theta@2.5e-08)
+  mu max: 0.01 -> 0.01; mu_growth events 0; dual_fallback 5, first_order 0
+  sweeps that raised theta: 5 of 12 (largest factor 1.5)
+
+== Ranger ==
+v1: kkt_tol
+  mu max: 10 -> 10; mu_growth events 0; dual_fallback 55, first_order 11
+v2: kkt_tol
+  steps 26: accepted 19 (73%), rejected 7 {np.str_('theta'): 7}
+  last 5 accepted: theta 4.23e-07, 1.95e-07, 9.14e-08, 4.25e-08, 2.22e-08
+    step contraction theta_trial/theta_before: 0.480, 0.608, 0.318, 0.324, 0.382
+    successive accepted theta ratio: 0.462, 0.468, 0.465, 0.522
+  cond(K) max over blocks: 2.4e+05 .. 2.7e+05
+  rejections after the first acceptance: 7 (theta@3.4e+00, theta@2.4e-07, theta@2.2e-07, theta@5.4e-08, theta@5.1e-08, theta@4.8e-08, theta@2.5e-08)
+  mu max: 10 -> 10; mu_growth events 0; dual_fallback 7, first_order 0
+  sweeps that raised theta: 14 of 27 (largest factor 1.8)
+v3: kkt_tol
+  steps 26: accepted 19 (73%), rejected 7 {np.str_('theta'): 7}
+  last 5 accepted: theta 4.23e-07, 1.95e-07, 9.14e-08, 4.25e-08, 2.22e-08
+    step contraction theta_trial/theta_before: 0.480, 0.608, 0.318, 0.324, 0.382
+    successive accepted theta ratio: 0.462, 0.468, 0.465, 0.522
+  cond(K) max over blocks: 2.4e+05 .. 2.7e+05
+  rejections after the first acceptance: 7 (theta@3.4e+00, theta@2.4e-07, theta@2.2e-07, theta@5.4e-08, theta@5.1e-08, theta@4.8e-08, theta@2.5e-08)
+  mu max: 10 -> 10; mu_growth events 0; dual_fallback 7, first_order 0
+  sweeps that raised theta: 14 of 27 (largest factor 1.8)
+v3_mu_lo: kkt_tol
+  steps 11: accepted 6 (55%), rejected 5 {np.str_('theta'): 5}
+  last 5 accepted: theta 7.20e-04, 1.86e-06, 1.22e-06, 1.60e-08, 1.03e-09
+    step contraction theta_trial/theta_before: 0.229, 0.022, 0.658, 0.052, 0.064
+    successive accepted theta ratio: 0.003, 0.658, 0.013, 0.064
+  first skipped sweep after event 24 (sweep 8, theta 1.86e-06); skipped sweeps: 2
+  cond(K) max over blocks: 4.1e+05 .. 6.5e+05
+  rejections after the first acceptance: 0 ()
+  mu max: 1 -> 1.73; mu_growth events 4; dual_fallback 5, first_order 0
+v3_mu_hi: max_outer_iter
+  steps 100: accepted 96 (96%), rejected 4 {np.str_('theta'): 4}
+  last 5 accepted: theta 1.80e-05, 1.66e-05, 1.54e-05, 1.43e-05, 1.32e-05
+    step contraction theta_trial/theta_before: 0.470, 0.471, 0.470, 0.470, 0.470
+    successive accepted theta ratio: 0.926, 0.926, 0.927, 0.927
+  first skipped sweep after event 1 (sweep 1, theta 1.42e+00); skipped sweeps: 2
+  cond(K) max over blocks: 5.4e+04 .. 6.4e+04
+  rejections after the first acceptance: 4 (theta@1.5e+00, theta@2.9e+01, theta@2.4e+02, theta@1.4e+00)
+  mu max: 100 -> 120; mu_growth events 1; dual_fallback 4, first_order 0
+  sweeps that raised theta: 93 of 98 (largest factor 2)
+v3_outer: kkt_tol
+  steps 22: accepted 16 (73%), rejected 6 {np.str_('theta'): 6}
+  last 5 accepted: theta 1.83e-07, 1.11e-07, 6.13e-08, 3.00e-08, 1.85e-08
+    step contraction theta_trial/theta_before: 0.604, 0.431, 0.357, 0.051, 0.615
+    successive accepted theta ratio: 0.604, 0.554, 0.490, 0.615
+  first skipped sweep after event 6 (sweep 3, theta 5.23e-02); skipped sweeps: 2
+  cond(K) max over blocks: 3.2e+03 .. 2.5e+05
+  rejections after the first acceptance: 6 (theta@2.8e+00, theta@1.5e+00, theta@6.1e-02, theta@2.8e-03, theta@3.3e-04, theta@1.2e-04)
+  mu max: 10 -> 12; mu_growth events 1; dual_fallback 6, first_order 0
+  sweeps that raised theta: 10 of 21 (largest factor 9.6)
+v3_harvest: kkt_tol
+  steps 35: accepted 27 (77%), rejected 8 {np.str_('theta'): 8}
+  last 5 accepted: theta 3.01e-07, 8.02e-08, 3.75e-08, 2.02e-08, 5.37e-09
+    step contraction theta_trial/theta_before: 0.453, 0.135, 0.468, 0.603, 0.121
+    successive accepted theta ratio: 0.266, 0.468, 0.539, 0.265
+  first skipped sweep after event 51 (sweep 22, theta 5.93e-07); skipped sweeps: 4
+  cond(K) max over blocks: 2.4e+05 .. 2.7e+05
+  rejections after the first acceptance: 8 (theta@3.5e+00, theta@3.0e+00, theta@1.8e+00, theta@3.2e-01, theta@3.4e-06, theta@1.0e-07, theta@9.5e-08, theta@5.7e-08)
+  mu max: 10 -> 17.3; mu_growth events 3; dual_fallback 8, first_order 0
+  sweeps that raised theta: 18 of 31 (largest factor 4.5)
+v3_norefine: kkt_tol
+  steps 50: accepted 34 (68%), rejected 16 {np.str_('theta'): 16}
+  last 5 accepted: theta 7.24e-08, 5.47e-08, 3.06e-08, 1.17e-08, 5.27e-09
+    step contraction theta_trial/theta_before: 0.395, 0.739, 0.300, 0.444, 0.128
+    successive accepted theta ratio: 0.756, 0.559, 0.381, 0.452
+  first skipped sweep after event 49 (sweep 19, theta 2.36e-01); skipped sweeps: 4
+  cond(K) max over blocks: 2.4e+05 .. 2.8e+05
+  rejections after the first acceptance: 16 (theta@6.9e-01, theta@6.8e-01, theta@1.5e+00, theta@3.7e-01, theta@4.7e-01, theta@1.7e+00, theta@4.0e-01, theta@4.8e-01)
+  mu max: 10 -> 17.3; mu_growth events 3; dual_fallback 16, first_order 0
+  sweeps that raised theta: 17 of 46 (largest factor 3.1)
+
