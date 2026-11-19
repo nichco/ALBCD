@@ -8,10 +8,10 @@ Implementation of `qn/IMPLEMENTATION_PLAN.md`. All new work is in `qn/`; no exis
 
 | File | Contents |
 |---|---|
-| `qn_subproblem.py` | `QNSubproblem(albcd.Subproblem)`: `x_scale`, `linearize()`, `local_multipliers()`, harvesting contract |
+| `qn_subproblem.py` | `QNSubproblem(albcd.Subproblem)`: `x_scale`, `grad_phi()`, `local_multipliers()`, harvesting contract |
 | `qn_core.py` | numpy-only core: damped BFGS + init rule, penalty update, stationarity / AL gradient, active sets, KKT measure θ, block condensation, coordinator solve, back-substitution, coupled step with refinement |
 | `qn_albcd.py` | `QuasiNewtonALBCD(albcd.ALBCD)`: modes `dual` (V1), `primal_dual` (V2), `adaptive` (V3), outer and harvested pairs, acceptance test, fallbacks, μ growth, event history (§2.4) |
-| `airliner_blocks.py`, `ranger_blocks.py` | copies of the examples' subproblem classes as `QNSubproblem`s, with `linearize`, `local_multipliers`, harvesting; `make_solver`, `compile_models` |
+| `airliner_blocks.py`, `ranger_blocks.py` | copies of the examples' subproblem classes as `QNSubproblem`s, with `grad_phi`, `local_multipliers`, harvesting; `make_solver`, `compile_models` |
 | `monolithic_tight_ranger.py`, `monolithic_tight_airliner.py` | Task 5 tight references |
 | `experiments_airliner.py`, `experiments_ranger.py`, `experiments_common.py` | Task 6 runs and summary tables |
 | `analyze_results.py`, `figures.py` | observations (`results/qn_observations.txt`) and figures for this report |
@@ -227,7 +227,7 @@ time limit.
 
 ## Deviations from the plan
 
-1. `QNSubproblem` has, besides `x_scale` / `linearize` / `local_multipliers`, two class attributes that the solver
+1. `QNSubproblem` has, besides `x_scale` / `grad_phi` / `local_multipliers`, two class attributes that the solver
    sets — `harvest` (record `self.curvature` only when QN uses harvested pairs, so plain ALBCD runs do not
    accumulate records) and `act_tol` (the §1.3 threshold) — and a `scale(n)` helper.
 2. `qn_core.active_sets` takes an extra `tight_tol` (rows within `tight_tol` of a bound are active even with κ = 0). It
@@ -246,7 +246,7 @@ time limit.
    means θ ≤ kkt_tol only; at max_outer_iter, `status` says whether ALBCD's own tolerances held.
 9. The history has extra per-event keys: `cond_K` (max over blocks, recorded for every step, not only when badly
    conditioned), `reason` (`theta` / `sign` / `singular_K` for rejections), `x_event`, `y_event`, `mu_event`.
-10. `AeroSubproblem.linearize` takes grad_f, J and Jh from one forward-mode Jacobian of [1e2·CD, c_aero, h]
+10. `AeroSubproblem.grad_phi` takes grad_f, J and Jh from one forward-mode Jacobian of [1e2·CD, c_aero, h]
     (9 inputs) instead of `jax.grad` + `jax.jacrev`: identical values, 0.6 s → 0.04 s per call.
 11. Both examples name their model file `models.py`. The blocks import each through `sys.path` but register it under
     an alias (`airliner_fleet_models`, `ranger_models`), so both can be imported in one process (the tests do).
@@ -273,4 +273,4 @@ time limit.
     such as v2 vs v3 at N = 8, are noise.
 
 Note on the interface: like any method with a primal step, the QN solver evaluates each block at solver-chosen
-points (`linearize` at the trial point), not only through full solves.
+points (`grad_phi` at the trial point), not only through full solves.

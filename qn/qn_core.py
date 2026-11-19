@@ -1,7 +1,7 @@
 """Numerical core of QuasiNewtonALBCD: pure functions, numpy only, no solver state.
 
 Conventions (IMPLEMENTATION_PLAN.md §1). A block's linearization ``lin`` is the dict returned by
-QNSubproblem.linearize, plus ``lin["v"]``, the block's (unscaled) variables at which it was taken. All linear
+QNSubproblem.grad_phi, plus ``lin["v"]``, the block's (unscaled) variables at which it was taken. All linear
 algebra works in the scaled variables x_hat = D * x: gradients and Jacobian columns are divided by D, and a
 scaled step is divided by D to give the unscaled one.
 
@@ -76,6 +76,11 @@ def stationarity(lin, lam, kappa):
     if len(kappa):
         r = r + np.asarray(lin["Jh"]).T @ kappa
     return r
+
+
+def kappa_or_zeros(kappa, nh):
+    """kappa if it has one entry per local constraint (nh of them), else zeros (no multipliers yet)."""
+    return kappa if kappa is not None and len(kappa) == nh else np.zeros(nh)
 
 
 def al_gradient(lin, lam, mu, phi_tilde, kappa):

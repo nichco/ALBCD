@@ -4,7 +4,7 @@ Copied from examples/jax/ranger/ranger.py (read only): tau (line 23), the variab
 (33-35), SQPSubproblem (38-85), AeroSubproblem (88-110), StructSubproblem (113-148) and the x0/data0 construction
 (152-158). The copied code is unchanged except:
   - SQPSubproblem subclasses QNSubproblem instead of Subproblem,
-  - additions: x_scale on both blocks, the new jitted functions in setup(), linearize(), local_multipliers(),
+  - additions: x_scale on both blocks, the new jitted functions in setup(), grad_phi(), local_multipliers(),
     tight_tol on the structures block, and the harvesting wrappers of the grad and jac callbacks in sqp()
     (gradients recorded without the proximal term).
 The example's models.py is imported through sys.path, not copied. Importing it takes ~30-40 s (STEP geometry).
@@ -12,30 +12,12 @@ The example's models.py is imported through sys.path, not copied. Importing it t
 
 import os
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
-import sys
 from pathlib import Path
+
+from example_import import import_example_models
 
 REPO = Path(__file__).resolve().parents[1]
 EXAMPLE = REPO / "examples" / "jax" / "ranger"
-
-
-def import_example_models(example, alias):
-    """Import ``example``/models.py through sys.path, registered as ``alias``: both examples name their model
-    file models.py, so a plain ``import models`` would return whichever example was imported first."""
-    import importlib
-    if alias in sys.modules:
-        return sys.modules[alias]
-    if str(example) not in sys.path:
-        sys.path.insert(0, str(example))
-    saved = sys.modules.pop("models", None)
-    try:
-        module = importlib.import_module("models")
-    finally:
-        sys.modules.pop("models", None)
-        if saved is not None:
-            sys.modules["models"] = saved
-    sys.modules[alias] = module
-    return module
 
 
 _models = import_example_models(EXAMPLE, "ranger_models")
@@ -83,7 +65,7 @@ class SQPSubproblem(QNSubproblem):
     def setup(self):
         self.obj, self.grad = jax.jit(self.objective), jax.jit(jax.grad(self.objective))
         self.con, self.jac = jax.jit(self.local_constraints), jax.jit(jax.jacrev(self.local_constraints))
-        # addition: this block's first-order information for linearize(), in one jitted function
+        # addition: this block's first-order information for grad_phi(), in one jitted function
         self.lin_fn = jax.jit(self.linear_pieces)
 
     def args(self, x, y, mu, data):
@@ -140,7 +122,7 @@ class SQPSubproblem(QNSubproblem):
                 del self._pending[key]
         return value
 
-    def linearize(self, x, data):
+    def grad_phi(self, x, data):
         v = jnp.asarray(self.decompose(x), dtype=float)
         pieces = {k: np.asarray(a) for k, a in self.lin_fn(v).items()}
         outputs = {k: pieces.pop(k) for k in self.OUTPUTS}
@@ -289,7 +271,7 @@ def make_solver(cls=ALBCD, **options):
 
 
 def compile_models(opt):
-    """Compile every jitted block function (solve callbacks and linearize) before a timed solve."""
+    """Compile every jitted block function (solve callbacks and grad_phi) before a timed solve."""
     x, y, mu, data = opt.x, np.zeros_like(opt.mu), opt.mu, opt.data
     for sp in opt.subproblems:
         v = jnp.asarray(sp.decompose(x))

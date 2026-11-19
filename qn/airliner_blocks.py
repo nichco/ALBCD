@@ -5,37 +5,19 @@ the compiled functions (59-60), kkt_rows (63-67) and FlightSubproblem (70-120). 
 except:
   - FlightSubproblem subclasses QNSubproblem instead of Subproblem, and takes (i, flights, T_budget) in place of
     the example's globals (budget() reads self.T_budget),
-  - additions: x_scale, linearize(), local_multipliers(), and the harvesting wrappers of the grad and jac
+  - additions: x_scale, grad_phi(), local_multipliers(), and the harvesting wrappers of the grad and jac
     callbacks passed to mo.ProblemLite.
 The example's models.py is imported through sys.path, not copied.
 """
 
 import os
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
-import sys
 from pathlib import Path
+
+from example_import import import_example_models
 
 REPO = Path(__file__).resolve().parents[1]
 EXAMPLE = REPO / "examples" / "jax" / "airliner_fleet"
-
-
-def import_example_models(example, alias):
-    """Import ``example``/models.py through sys.path, registered as ``alias``: both examples name their model
-    file models.py, so a plain ``import models`` would return whichever example was imported first."""
-    import importlib
-    if alias in sys.modules:
-        return sys.modules[alias]
-    if str(example) not in sys.path:
-        sys.path.insert(0, str(example))
-    saved = sys.modules.pop("models", None)
-    try:
-        module = importlib.import_module("models")
-    finally:
-        sys.modules.pop("models", None)
-        if saved is not None:
-            sys.modules["models"] = saved
-    sys.modules[alias] = module
-    return module
 
 
 _models = import_example_models(EXAMPLE, "airliner_fleet_models")
@@ -148,7 +130,7 @@ class FlightSubproblem(QNSubproblem):
                                    np.array(self.outputs_jac(v)[:-1], copy=True)))
         return grad
 
-    def linearize(self, x, data):
+    def grad_phi(self, x, data):
         v = np.asarray(self.decompose(x), dtype=float)
         out = self.outputs(v)
         jac = self.outputs_jac(v)

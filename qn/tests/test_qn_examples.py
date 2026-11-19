@@ -1,4 +1,4 @@
-"""Tests of the example blocks' linearize() and local_multipliers() (Task 4). Slow: importing ranger's models takes
+"""Tests of the example blocks' grad_phi() and local_multipliers() (Task 4). Slow: importing ranger's models takes
 ~30-40 s. Each problem is checked at the point after one ALBCD sweep (airliner with N = 2)."""
 
 import numpy as np
@@ -46,7 +46,7 @@ def block_objective(name, module, sp, v):
     if name == "airliner":
         return float(sp.outputs(np.array(v))[-1])
     if isinstance(sp, module.AeroSubproblem):
-        return 1e2 * sp.linearize(sp.recompose(np.zeros(sp.index.stop), v), {})["outputs"]["CD"]
+        return 1e2 * sp.grad_phi(sp.recompose(np.zeros(sp.index.stop), v), {})["outputs"]["CD"]
     return 0.0
 
 
@@ -57,7 +57,7 @@ def block_objective(name, module, sp, v):
 @pytest.mark.parametrize("name", PROBLEMS)
 def test_separability(request, name):
     module, opt = get(request, name)
-    lins = [sp.linearize(opt.x, opt.data) for sp in opt.subproblems]
+    lins = [sp.grad_phi(opt.x, opt.data) for sp in opt.subproblems]
     np.testing.assert_allclose(sum(lin["c"] for lin in lins), opt.phi, rtol=0, atol=1e-12)
 
 
@@ -70,7 +70,7 @@ def test_derivatives(request, name):
     """Central differences of f, c and h in the scaled variables (step 1e-6) against grad_f, J and Jh."""
     module, opt = get(request, name)
     for sp in opt.subproblems:
-        lin = sp.linearize(opt.x, opt.data)
+        lin = sp.grad_phi(opt.x, opt.data)
         v = np.array(opt.x[sp.index], dtype=float)
         D = sp.scale(len(v))
         n = len(v)
@@ -83,7 +83,7 @@ def test_derivatives(request, name):
             xp, xm = opt.x.copy(), opt.x.copy()
             xp[sp.index] = v + e
             xm[sp.index] = v - e
-            lp, lm = sp.linearize(xp, opt.data), sp.linearize(xm, opt.data)
+            lp, lm = sp.grad_phi(xp, opt.data), sp.grad_phi(xm, opt.data)
             g_fd[j] = (block_objective(name, module, sp, v + e) - block_objective(name, module, sp, v - e)) / 2e-6
             J_fd[:, j] = (lp["c"] - lm["c"]) / 2e-6
             Jh_fd[:, j] = (lp["h"] - lm["h"]) / 2e-6
@@ -109,7 +109,7 @@ def solve_block_and_residuals(name, module, opt, sp):
     v = np.array(out["x"][sp.index], dtype=float)
     kappa = sp.local_multipliers()
     xn = out["x"]
-    lin = sp.linearize(xn, data)
+    lin = sp.grad_phi(xn, data)
     lin["v"] = v
     if name == "airliner":
         g = sp.objective_gradient(v, x, y, mu)
@@ -157,7 +157,7 @@ def test_airliner_kappa_signs(airliner):
     module, opt = airliner
     for sp in opt.subproblems:
         kappa = sp.local_multipliers()
-        lin = sp.linearize(opt.x, opt.data)
+        lin = sp.grad_phi(opt.x, opt.data)
         two_sided = (lin["cl"] != lin["cu"])
         near_cl = two_sided & (np.abs(lin["h"] - lin["cl"]) <= 1e-6)
         near_cu = two_sided & (np.abs(lin["h"] - lin["cu"]) <= 1e-6)
@@ -174,9 +174,9 @@ def test_airliner_kappa_signs(airliner):
 def test_outputs_match_solve(request, name):
     module, opt = get(request, name)
     for sp in opt.subproblems:
-        outputs = sp.linearize(opt.x, opt.data)["outputs"]
+        outputs = sp.grad_phi(opt.x, opt.data)["outputs"]
         for key, value in outputs.items():
             np.testing.assert_allclose(value, opt.data[key], rtol=1e-10, atol=1e-10)
     if name == "ranger":
-        keys = set().union(*(sp.linearize(opt.x, opt.data)["outputs"] for sp in opt.subproblems))
+        keys = set().union(*(sp.grad_phi(opt.x, opt.data)["outputs"] for sp in opt.subproblems))
         assert keys == {"aero_loads", "CD", "weight"}

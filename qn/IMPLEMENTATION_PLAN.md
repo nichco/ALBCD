@@ -46,8 +46,8 @@ qn/
   qn_subproblem.py         Task 1: QNSubproblem, a subclass of albcd.Subproblem
   qn_core.py               Task 2: pure numerical functions
   qn_albcd.py              Task 3: QuasiNewtonALBCD, a subclass of albcd.ALBCD
-  airliner_blocks.py       Task 4: airliner blocks with linearize()
-  ranger_blocks.py         Task 4: ranger blocks with linearize()
+  airliner_blocks.py       Task 4: airliner blocks with grad_phi()
+  ranger_blocks.py         Task 4: ranger blocks with grad_phi()
   monolithic_tight_ranger.py, monolithic_tight_airliner.py     Task 5
   experiments_airliner.py, experiments_ranger.py               Task 6
   conftest.py              registers the "slow" marker, puts qn/ on sys.path
@@ -260,10 +260,10 @@ for k in 1..max_outer_iter:
         lam ← y + mu ⊙ phi
     else:
         lam ← y   (y was set from the last accepted step)
-    lin_i ← block.linearize(x, data) for every block; update B_i with outer pairs from the previous lin_i
+    lin_i ← block.grad_phi(x, data) for every block; update B_i with outer pairs from the previous lin_i
     theta ← θ(x, lam, kappa)  (§1.6);  record it
     if theta ≤ kkt_tol: success; break
-    compute the step (§1.8), the trial point, then lin_trial ← linearize at the trial point
+    compute the step (§1.8), the trial point, then lin_trial ← grad_phi at the trial point
     theta_trial ← θ(x_trial, lam_trial, kappa_trial)
     accepted ← theta_trial ≤ accept·theta
                and no active inequality's κ changed sign
@@ -314,7 +314,7 @@ Create `qn/qn_subproblem.py` with `class QNSubproblem(Subproblem)`, where `Subpr
 ```python
 x_scale = None   # class attribute: scale vector D for this block's variables (None → ones)
 
-def linearize(self, x, data) -> dict:
+def grad_phi(self, x, data) -> dict:
     """First-order information of this block at the global x, for QuasiNewtonALBCD. Optional.
 
     Returns a dict with, for this block's variables v = x[self.index] (unscaled):
@@ -365,9 +365,9 @@ Create `qn/tests/test_qn_core.py` with:
 
 ### Task 3: Solver class
 
-Create `qn/qn_albcd.py` with `class QuasiNewtonALBCD(ALBCD)`, where `ALBCD` comes from the installed `albcd` package, implementing §2 using `qn_core`. Reuse `ALBCD._update_mu` by calling it; don't copy it. Write the sweep helper in the subclass, mirroring the body of `ALBCD._block_coordinate_descent` and appending to the same history keys. At the start of `solve()`, raise a clear error if any subproblem isn't a `QNSubproblem` that implements `linearize` and `local_multipliers`.
+Create `qn/qn_albcd.py` with `class QuasiNewtonALBCD(ALBCD)`, where `ALBCD` comes from the installed `albcd` package, implementing §2 using `qn_core`. Reuse `ALBCD._update_mu` by calling it; don't copy it. Write the sweep helper in the subclass, mirroring the body of `ALBCD._block_coordinate_descent` and appending to the same history keys. At the start of `solve()`, raise a clear error if any subproblem isn't a `QNSubproblem` that implements `grad_phi` and `local_multipliers`.
 
-Add tests to `qn/tests/test_qn_albcd.py`, using the closed-form problem from `tests/test_albcd.py`. Write a **new** `Block` class in the test file: a `QNSubproblem` with the same `solve` and `gradient` as the existing test's `Block`, plus `linearize` and `local_multipliers`. Don't import from the existing test file. The problem is f = (x0 − 1)² + (x1 − 3)², φ = x0 − x1, with solution x = [2, 2], y = −2. There are no local constraints, so h is empty and κ has length 0.
+Add tests to `qn/tests/test_qn_albcd.py`, using the closed-form problem from `tests/test_albcd.py`. Write a **new** `Block` class in the test file: a `QNSubproblem` with the same `solve` and `gradient` as the existing test's `Block`, plus `grad_phi` and `local_multipliers`. Don't import from the existing test file. The problem is f = (x0 − 1)² + (x1 − 3)², φ = x0 − x1, with solution x = [2, 2], y = −2. There are no local constraints, so h is empty and κ has length 0.
 
 1. With Bᵢ initialized to the true Hessians (2 for each block; add a test-only hook `B0={i: matrix}`), `mode="primal_dual"` reaches θ ≤ 1e-12 after its first step.
 2. With default initialization, every mode reaches θ ≤ 1e-10 and x = [2, 2] to 1e-9, y = [−2] to 1e-8.
@@ -381,7 +381,7 @@ Add tests to `qn/tests/test_qn_albcd.py`, using the closed-form problem from `te
 
 **Done when:** `pytest -p no:cacheprovider qn/tests/test_qn_albcd.py qn/tests/test_qn_core.py` passes.
 
-### Task 4: Example blocks with `linearize`
+### Task 4: Example blocks with `grad_phi`
 
 The example scripts can't be imported (they run at module level), and they are off-limits anyway. Create **new** modules in `qn/` that copy the subproblem classes (each one subclassing `QNSubproblem`, not `Subproblem`) and add the new methods. Keep the copied code identical apart from the additions and the constructor changes listed below, and put a comment at the top naming the source file and lines. Import each example's `models.py` through `sys.path` (§0.1); don't copy `models.py`.
 
@@ -390,7 +390,7 @@ The example scripts can't be imported (they run at module level), and they are o
 - `make_fleet(N)`: same ranges, masses, flights and T_budget as `airliner_fleet.py` (LatinHypercube seed 0; `T_budget = 0.9 * np.sum(0.276 + 5.468e-6 * ranges)`).
 - `class FlightSubproblem(Subproblem)`: copy from `airliner_fleet.py`, with constructor `(i, flights, T_budget)` in place of the globals. Add:
   - `x_scale = x_scaler`
-  - `linearize`:
+  - `grad_phi`:
     - grad_f = `outputs_jac(v)[-1]` (fuel gradient)
     - c = [τᵢ − (T_budget if i == 0 else 0)]
     - J = unit row at the last variable
@@ -406,12 +406,12 @@ The example scripts can't be imported (they run at module level), and they are o
 
 - Copy `coupling`, `SQPSubproblem`, `AeroSubproblem` and `StructSubproblem` from `ranger.py`, with the proximal coefficient `tau = 0.0`.
 - Add `x_scale = X_SCALER` to both blocks.
-- `AeroSubproblem.linearize`, with v = [twist_cp, weight_copy]:
+- `AeroSubproblem.grad_phi`, with v = [twist_cp, weight_copy]:
   - grad_f = gradient of 1e2·CD(twist), with 0 for weight_copy (`jax.grad`)
   - c = c_aero (§1.1), J = `jax.jacrev(c_aero)`
   - h = [lift − weight_copy], Jh via `self.jac`; cl = cu = [0]; bounds ±inf
   - outputs = {"aero_loads": …, "CD": …}
-- `StructSubproblem.linearize`, with v = [thickness_cp, loads_copy]:
+- `StructSubproblem.grad_phi`, with v = [thickness_cp, loads_copy]:
   - grad_f = 0
   - c = c_struct, J = `jax.jacrev(c_struct)`
   - h = [max_sigma − yield], cl = [−inf], cu = [0]
@@ -424,10 +424,10 @@ The example scripts can't be imported (they run at module level), and they are o
 
 **Tests**, in `qn/tests/test_qn_examples.py`, skipped if jax or modopt is missing. Mark them slow with `pytest.mark.slow`. The marker is registered in `qn/conftest.py` (§0.1), not in `pyproject.toml`.
 
-1. **Separability:** after one ALBCD sweep, Σᵢ linearize(x)["c"] equals `opt.phi` to 1e-12, on both problems (airliner with N = 2).
+1. **Separability:** after one ALBCD sweep, Σᵢ grad_phi(x)["c"] equals `opt.phi` to 1e-12, on both problems (airliner with N = 2).
 2. **Derivatives:** central finite differences of grad_f, J and Jh at the post-sweep point agree to 1e-5 relative.
 3. **Multiplier signs:** after a block solve, the residual `grad_obj + Jhᵀκ` at the solved point (with grad_obj the subproblem AL gradient), restricted to free variables, has max-norm ≤ 10 × the block solver's tolerance. This check validates §1.3.
-4. **Outputs:** linearize's `outputs` match what `solve()` wrote, when evaluated at the same x.
+4. **Outputs:** grad_phi's `outputs` match what `solve()` wrote, when evaluated at the same x.
 
 **Done when:** all tests under `qn/tests` pass.
 
@@ -512,7 +512,7 @@ If a criterion isn't met, **report it. Don't change the method to meet it.** Sug
 - **modopt scaling:** with `x_scaler`, user callbacks receive *unscaled* v. Record unscaled v in harvested curvature and scale it in the solver.
 - **`last_call_cache`** in the airliner caches the last evaluation per point. Don't mutate arrays it returns, and `.copy()` before storing.
 - **Ranger's `coupling()`** scales loads by 1e-3 and weight by 1e-4, and the `X_SCALER` of the load copies is 1e-2. Don't add further scaling.
-- **φ consistency after a step.** After a QN step moves all blocks at once, ranger's `data["weight"]` and `data["aero_loads"]` must come from `linearize(...)["outputs"]` at the trial point. Otherwise the next block solve uses stale coupling data.
+- **φ consistency after a step.** After a QN step moves all blocks at once, ranger's `data["weight"]` and `data["aero_loads"]` must come from `grad_phi(...)["outputs"]` at the trial point. Otherwise the next block solve uses stale coupling data.
 - **Stale `gradient()` state.** `gradient()` in both examples uses multipliers (and, in the airliner, Jacobian rows) cached during the last `solve()`. After a QN step this cache is stale. The QN solver must use θ from §1.6 and must not call `gradient()` for its decisions. ALBCD's per-sweep `optimality` history, computed after solves, stays valid.
 - **The ranger structures block has no objective term**, and its load copies enter only linearly. Its Bᵢ gets curvature in those directions only through the penalty term, μ·(1e-3)² per copy in unscaled terms. Initial scaling and the Δμ updates matter there. If K is badly conditioned, report the condition numbers per step in the history (`"cond_K"`), but don't add regularization unless Task 3's tests require it.
 - **The airliner has 602 inequality path constraints per flight.** Expect many active rows: the active rows must have full row rank on the free variables. If `np.linalg.solve` on K raises or produces a residual above 1e-8 relative, treat the step as rejected (event `qn_reject`, reason `"singular_K"`) and continue.

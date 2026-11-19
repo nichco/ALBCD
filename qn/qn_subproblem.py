@@ -1,7 +1,7 @@
 """Block interface for QuasiNewtonALBCD: albcd.Subproblem plus first-order information.
 
 QuasiNewtonALBCD needs, besides the block solves, each block's objective gradient, coupling term and local
-constraints with their derivatives at the current x (linearize), and the multipliers of its local constraints
+constraints with their derivatives at the current x (grad_phi), and the multipliers of its local constraints
 from the latest solve (local_multipliers). Optionally, a block records the points its optimizer evaluates
 (self.curvature), which the solver turns into free BFGS pairs.
 """
@@ -24,7 +24,7 @@ class QNSubproblem(Subproblem):
     harvest = False  # set by QuasiNewtonALBCD: record self.curvature during solve()
     act_tol = 1e-8   # set by QuasiNewtonALBCD: activity threshold for local-constraint multipliers
 
-    def linearize(self, x, data) -> dict:
+    def grad_phi(self, x, data) -> dict:
         """First-order information of this block at the global x, for QuasiNewtonALBCD. Optional.
 
         Returns a dict with, for this block's variables v = x[self.index] (unscaled):

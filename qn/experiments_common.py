@@ -14,7 +14,7 @@ import numpy as np
 from albcd import ALBCD
 
 import qn_core as qc
-from qn_albcd import QuasiNewtonALBCD
+from qn_albcd import QuasiNewtonALBCD, linearization, point
 
 
 class TimeLimit(Exception):
@@ -51,18 +51,9 @@ def instrument(opt, time_limit, record_sweeps):
 def theta_at(opt, x, y, mu, phi, kappas, data):
     """theta (§1.6) at a post-sweep point with lam = y + mu * phi, the blocks' local multipliers and active sets."""
     lam = y + mu * phi
-    lins, frees = [], []
-    for sp, k in zip(opt.subproblems, kappas):
-        lin = dict(sp.linearize(x, data))
-        lin["v"] = np.array(x[sp.index], dtype=float)
-        if len(k) != len(lin["h"]):
-            k = np.zeros(len(lin["h"]))
-        r = qc.stationarity(lin, lam, k)
-        free, _, _ = qc.active_sets(lin, k, r, 1e-8, 1e-8, getattr(sp, "tight_tol", None))
-        lins.append(lin)
-        frees.append(free)
-    kappas = [k if len(k) == len(l["h"]) else np.zeros(len(l["h"])) for k, l in zip(kappas, lins)]
-    return qc.kkt_measure(lins, lam, kappas, frees, phi)
+    points = [point(sp, linearization(sp, x, data), lam, k) for sp, k in zip(opt.subproblems, kappas)]
+    kappas = [qc.kappa_or_zeros(k, len(p["lin"]["h"])) for k, p in zip(kappas, points)]
+    return qc.kkt_measure([p["lin"] for p in points], lam, kappas, [p["free"] for p in points], phi)
 
 
 def run_config(name, build, compile_models, dist, time_limit=np.inf, log=print):

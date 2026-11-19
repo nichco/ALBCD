@@ -47,7 +47,7 @@ def reference_theta(N, ref):
     lins, kappas, frees = [], [], []
     phi = np.zeros(1)
     for i, sp in enumerate(opt.subproblems):
-        lin = dict(sp.linearize(z, {}))
+        lin = dict(sp.grad_phi(z, {}))
         lin["v"] = z[sp.index]
         k = kappa_all[i * ncon:(i + 1) * ncon]
         r = qc.stationarity(lin, lam, k)

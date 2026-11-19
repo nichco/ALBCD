@@ -1,7 +1,7 @@
 """QuasiNewtonALBCD: ALBCD with a coupled quasi-Newton step, computed block by block, at every multiplier update.
 
 See IMPLEMENTATION_PLAN.md §1-§2. After the block sweeps, every block linearizes itself at the current x
-(QNSubproblem.linearize). With the multiplier estimate lam = y + mu * phi, the local-constraint multipliers kappa_i
+(QNSubproblem.grad_phi). With the multiplier estimate lam = y + mu * phi, the local-constraint multipliers kappa_i
 from the block solves and a damped-BFGS model B_i of each block's augmented-Lagrangian Hessian, the solver takes
 one Newton step on the KKT conditions of the whole problem. The step is computed by condensing every block onto
 the coupling multipliers (one small factorization per block, independent of the others), solving an m_c x m_c
@@ -13,7 +13,7 @@ Modes
     "primal_dual"  (V2) ``sweeps`` sweeps, then the full step (x, kappa, y).
     "adaptive"     (V3) V2, but the next sweep is skipped after a step that reduced theta by ``skip_factor``.
 
-The solver depends only on numpy and albcd; blocks must be QNSubproblem instances that implement linearize and
+The solver depends only on numpy and albcd; blocks must be QNSubproblem instances that implement grad_phi and
 local_multipliers.
 """
 
@@ -26,6 +26,28 @@ from qn_subproblem import QNSubproblem
 
 MODES = ("dual", "primal_dual", "adaptive")
 PAIRS = ("outer", "harvest", "both")
+
+
+def linearization(sp, x, data):
+    """Block sp's grad_phi at x, as float arrays of consistent shapes, plus lin["v"] = x[sp.index]."""
+    lin = dict(sp.grad_phi(x, data))
+    lin["v"] = np.array(x[sp.index], dtype=float)
+    n = len(lin["v"])
+    for key in ("grad_f", "c", "h", "cl", "cu", "xl", "xu"):
+        lin[key] = np.atleast_1d(np.asarray(lin[key], dtype=float))
+    lin["J"] = np.asarray(lin["J"], dtype=float).reshape(len(lin["c"]), n)
+    lin["Jh"] = np.asarray(lin["Jh"], dtype=float).reshape(len(lin["h"]), n)
+    lin.setdefault("outputs", {})
+    return lin
+
+
+def point(sp, lin, lam, kappa, act_tol=1e-8, bnd_tol=1e-8):
+    """A linearization of block sp with its active sets at (lam, kappa)."""
+    kappa = qc.kappa_or_zeros(kappa, len(lin["h"]))
+    r = qc.stationarity(lin, lam, kappa)
+    free, rows, bvals = qc.active_sets(lin, kappa, r, act_tol, bnd_tol, getattr(sp, "tight_tol", None))
+    return dict(lin=lin, D=sp.scale(len(lin["v"])), free=free, rows=rows, bvals=bvals,
+                key=(tuple(rows), tuple(np.flatnonzero(~free))))
 
 
 class QuasiNewtonALBCD(ALBCD):
@@ -80,40 +102,30 @@ class QuasiNewtonALBCD(ALBCD):
     def _check_blocks(self):
         for i, sp in enumerate(self.subproblems):
             ok = isinstance(sp, QNSubproblem)
-            ok = ok and type(sp).linearize is not QNSubproblem.linearize
+            ok = ok and type(sp).grad_phi is not QNSubproblem.grad_phi
             ok = ok and type(sp).local_multipliers is not QNSubproblem.local_multipliers
             if not ok:
                 raise TypeError(f"QuasiNewtonALBCD: subproblem {i} ({type(sp).__name__}) must be a QNSubproblem that "
-                                "implements linearize() and local_multipliers()")
+                                "implements grad_phi() and local_multipliers()")
             sp.harvest = self.pairs in ("harvest", "both")
             sp.act_tol = self.act_tol
 
     def _event(self, name, theta=np.nan, dt_par=0.0, cond_K=np.nan, reason=""):
         self._t_par += dt_par
-        h = self.history
-        h["event"].append(name)
-        h["theta"].append(float(theta))
-        h["time"].append(time.perf_counter() - self._t0)
-        h["t_parallel"].append(self._t_par)
-        h["n_solves"].append(self._n_solves)
-        h["n_linearize"].append(self._n_lin)
-        h["n_pairs"].append(self._n_pairs)
-        h["cond_K"].append(float(cond_K))
-        h["reason"].append(reason)
-        h["x_event"].append(self.x.copy())
-        h["y_event"].append(self.y.copy())
-        h["mu_event"].append(self.mu.copy())
+        record = dict(event=name, theta=float(theta), time=time.perf_counter() - self._t0, t_parallel=self._t_par,
+                      n_solves=self._n_solves, n_linearize=self._n_lin, n_pairs=self._n_pairs, cond_K=float(cond_K),
+                      reason=reason, x_event=self.x.copy(), y_event=self.y.copy(), mu_event=self.mu.copy())
+        for key, value in record.items():
+            self.history[key].append(value)
 
     def _patch_last_event(self, theta, dt_par=0.0):
         """Set theta of the latest event (a sweep, before the linearization that evaluates theta) and add the
         linearization's critical-path time to it."""
         self._t_par += dt_par
-        h = self.history
-        h["theta"][-1] = float(theta)
-        h["t_parallel"][-1] = self._t_par
-        h["time"][-1] = time.perf_counter() - self._t0
-        h["n_linearize"][-1] = self._n_lin
-        h["n_pairs"][-1] = self._n_pairs
+        record = dict(theta=float(theta), t_parallel=self._t_par, time=time.perf_counter() - self._t0,
+                      n_linearize=self._n_lin, n_pairs=self._n_pairs)
+        for key, value in record.items():
+            self.history[key][-1] = value
 
     def _ensure_B(self, i, n):
         if self.B[i] is None:
@@ -196,30 +208,14 @@ class QuasiNewtonALBCD(ALBCD):
     # ------------------------------------------------------------------------------------------------------
 
     def _point(self, i, lin, lam, kappa):
-        """A linearization of block i with its active sets at (lam, kappa)."""
-        sp = self.subproblems[i]
-        n = len(lin["v"])
-        if kappa is None or len(kappa) != len(lin["h"]):
-            kappa = np.zeros(len(lin["h"]))
-        r = qc.stationarity(lin, lam, kappa)
-        free, rows, bvals = qc.active_sets(lin, kappa, r, self.act_tol, self.bnd_tol, getattr(sp, "tight_tol", None))
-        return dict(lin=lin, D=sp.scale(n), free=free, rows=rows, bvals=bvals,
-                    key=(tuple(rows), tuple(np.flatnonzero(~free))))
+        return point(self.subproblems[i], lin, lam, kappa, self.act_tol, self.bnd_tol)
 
     def _linearize(self, i, x):
-        sp = self.subproblems[i]
         t = time.perf_counter()
-        lin = dict(sp.linearize(x, self.data))
+        lin = linearization(self.subproblems[i], x, self.data)
         dt = time.perf_counter() - t
         self._n_lin += 1
-        lin["v"] = np.array(x[sp.index], dtype=float)
-        n = len(lin["v"])
-        for key in ("grad_f", "c", "h", "cl", "cu", "xl", "xu"):
-            lin[key] = np.atleast_1d(np.asarray(lin[key], dtype=float))
-        lin["J"] = np.asarray(lin["J"], dtype=float).reshape(len(lin["c"]), n)
-        lin["Jh"] = np.asarray(lin["Jh"], dtype=float).reshape(len(lin["h"]), n)
-        lin.setdefault("outputs", {})
-        self._ensure_B(i, n)
+        self._ensure_B(i, len(lin["v"]))
         return lin, dt
 
     def _theta(self, points, lam, kappas, phi, parts=False):
@@ -232,7 +228,7 @@ class QuasiNewtonALBCD(ALBCD):
             return
         lo, ln = old["lin"], new["lin"]
         others = np.asarray(phi_new) - ln["c"]
-        k = np.zeros(len(ln["h"])) if kappa is None or len(kappa) != len(ln["h"]) else kappa
+        k = qc.kappa_or_zeros(kappa, len(ln["h"]))
         g_new = qc.al_gradient(ln, lam, self.mu, ln["c"] + others, k)
         g_old = qc.al_gradient(lo, lam, self.mu, lo["c"] + others, k)
         D = new["D"]
@@ -251,8 +247,7 @@ class QuasiNewtonALBCD(ALBCD):
             for i, (old, new) in enumerate(zip(self.points, points)):
                 self._outer_pair(i, old, new, lam, self.kloc[i], self.phi)
         self.points = points
-        self.kloc = [k if k is not None and len(k) == len(p["lin"]["h"]) else np.zeros(len(p["lin"]["h"]))
-                      for k, p in zip(self.kloc, points)]
+        self.kloc = [qc.kappa_or_zeros(k, len(p["lin"]["h"])) for k, p in zip(self.kloc, points)]
         theta = self._theta(points, lam, self.kloc, self.phi)
         return theta, max(dts)
 
@@ -326,6 +321,11 @@ class QuasiNewtonALBCD(ALBCD):
 
     def _clip_y(self, y):
         return np.clip(y, -self.max_y, self.max_y)
+
+    def _dual_ok(self, dlam, lam):
+        """dlam is finite and within dual_cap of the multiplier scale."""
+        return (dlam is not None and np.all(np.isfinite(dlam))
+                and np.max(np.abs(dlam)) <= self.dual_cap * max(1.0, np.max(np.abs(lam))))
 
     def _solve_primal_dual(self):
         skip = False
@@ -402,8 +402,7 @@ class QuasiNewtonALBCD(ALBCD):
             if not accepted:
                 rejections += 1
                 skip = False
-                if dlam is not None and np.all(np.isfinite(dlam)) and \
-                        np.max(np.abs(dlam)) <= self.dual_cap * max(1.0, np.max(np.abs(lam))):
+                if self._dual_ok(dlam, lam):
                     self.y = self._clip_y(lam + dlam)
                     self._event("dual_fallback")
                 else:
@@ -440,7 +439,7 @@ class QuasiNewtonALBCD(ALBCD):
                     self._event("first_order", reason="singular_K")
                 else:
                     dlam, t_fac, t_coord, cond = step[2:]
-                    if np.all(np.isfinite(dlam)) and np.max(np.abs(dlam)) <= self.dual_cap * max(1.0, np.max(np.abs(lam))):
+                    if self._dual_ok(dlam, lam):
                         self.y = self._clip_y(lam + dlam)
                         self._event("dual_fallback", np.nan, t_fac + t_coord, cond)
                     else:

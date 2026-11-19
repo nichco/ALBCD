@@ -47,7 +47,7 @@ class Block(QNSubproblem):
         phi = x[0] - x[1]
         return np.atleast_1d(2 * (x[self.i] - self.target) + self.sign * (y + mu * phi))
 
-    def linearize(self, x, data):
+    def grad_phi(self, x, data):
         v = x[self.i]
         return dict(grad_f=np.array([2 * (v - self.target)]), c=np.array([self.sign * v]), J=np.array([[self.sign]]),
                     h=np.zeros(0), Jh=np.zeros((0, 1)), cl=np.zeros(0), cu=np.zeros(0),
@@ -126,8 +126,8 @@ def test_requires_qn_blocks():
 
 def test_rejects_nonseparable_coupling():
     class WrongC(Block):
-        def linearize(self, x, data):
-            lin = super().linearize(x, data)
+        def grad_phi(self, x, data):
+            lin = super().grad_phi(x, data)
             lin["c"] = lin["c"] + 1.0
             return lin
 
@@ -181,7 +181,7 @@ class BlockA(QNSubproblem):
         g = np.array([2 * (a - 1) + 3 * a ** 2 * lam[0], -lam[1]])
         return g + np.array([2 * a, -1.0]) * self._kappa[0]
 
-    def linearize(self, x, data):
+    def grad_phi(self, x, data):
         a, w = x[0], x[1]
         return dict(grad_f=np.array([2 * (a - 1), 0.0]), c=np.array([a ** 3, -w]),
                     J=np.array([[3 * a ** 2, 0.0], [0.0, -1.0]]), h=np.array([a ** 2 - w]),
@@ -234,7 +234,7 @@ class BlockB(QNSubproblem):
             g[1] = min(g[1], 0.0)
         return g
 
-    def linearize(self, x, data):
+    def grad_phi(self, x, data):
         l, t = x[2], x[3]
         return dict(grad_f=np.array([0.0, 2 * (t - 2)]), c=np.array([-l, t ** 2]),
                     J=np.array([[-1.0, 0.0], [0.0, 2 * t]]), h=np.array([l + t]), Jh=np.array([[1.0, 1.0]]),
