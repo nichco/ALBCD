@@ -139,8 +139,8 @@ Details per configuration: `results/qn_observations.txt`.
 
 **Acceptance rate.** Airliner: 58–75 % of the steps accepted in v2/v3 (v3: 9/12 at N = 4, 8/13 at N = 8); the
 rejections are κ sign flips in the first three outer iterations, while SLSQP's active sets are still changing,
-then 0–2 θ-rejections near 1e-7. Ranger: 73 % (19/26), all rejections θ-based (one of them right after a sweep in
-which a block solve ran away to θ ≈ 3).
+then 0–2 θ-rejections near 1e-7. Ranger: 73 % (19/26), all rejections θ-based: one early trial step (θ_trial = 3.4
+from θ = 2.9 at sweep 2, ‖x − x*‖ = 0.25), the others between 2e-7 and 3e-8.
 
 **When skipping started (V3).** Airliner: after the first accepted step, at sweep 4 (θ ≈ 8e-7), but only 1 sweep was
 skipped at N = 4 and N = 8 — later steps reduce θ by less than `skip_factor` = 5. Ranger: never — no step reached a
@@ -171,13 +171,21 @@ than `albcd_tight` to 1e-8 (155) but more time (189 s), and 2.5–9× slower tha
 varies, 5e-6 – 2e-5): its inner loop asks for optimality 1e-9, below SLSQP's stationarity floor, and burns
 thousands of one-iteration sweeps (2620 in the run above) until the time limit. On
 ranger (OpenSQP stops on the KKT residual) it converges to θ = 7.5e-10 in 250 sweeps / 320 s (θ ≤ 1e-8 after
-155 sweeps / 189 s); v3 reaches 1e-8 in 27 sweeps / 95 s, `v3_mu_lo` in 9 sweeps / 26.5 s.
+155 sweeps / 189 s); v3 reaches 1e-8 in 27 sweeps / 95 s, `v3_mu_lo` in 9 sweeps / 26.5 s. Its last ~40 sweeps
+(211–249) show θ ≈ 4.3 while ‖x − x*‖ keeps decreasing (4.7e-8 → 3.4e-8): failure mode 3 below. ALBCD's own
+optimality uses the same wrong multiplier, so it keeps sweeping until a structures solve succeeds again (sweep 250).
 
 **Failure modes seen.**
 1. Penalty-dominated curvature → linear rate, failure at μ0 = 100 on ranger (above).
 2. Harvest-only stall when the sweeps stop moving x (airliner).
-3. Block solves that run away from a near-optimal warm start (ranger, OpenSQP; θ jumps to O(1) after a sweep). The
-   next QN step recovers in one step because acceptance is measured against the post-sweep θ.
+3. Failed structures solves with a wrong multiplier (ranger, OpenSQP). From a near-optimal warm start with the stress
+   constraint active, the structures block's OpenSQP sometimes stops at maxiter (50 iterations, optimality ≈ 0.08)
+   and returns a stress multiplier of ≈ 1e-7 instead of 4.9e-5. The design barely moves, so x keeps converging, but
+   θ after that sweep jumps to O(1) (≈ 4.3: the structures block's stationarity without the κ∇σ term). Seen in
+   `v3_harvest` (a sweep with θ = 4.3 while ‖x − x*‖ went 1.2e-7 → 1.1e-7) and in `albcd_tight`. In QN runs the
+   next step recovers at once (θ 4.3 → 6.6e-7): its κ comes from the step, and acceptance is measured against the
+   post-sweep θ. (Diagnosed on 2026-11-20 by decomposing θ per block after every sweep of a ranger `albcd_tight`
+   run; an earlier version of this report called these "block solves that run away", which was wrong.)
 4. Sweeps that raise θ back to the block solver's floor (airliner, SLSQP).
 
 **Suggestions (not implemented — the plan says not to change the method to meet a criterion).**
@@ -274,3 +282,39 @@ time limit.
 
 Note on the interface: like any method with a primal step, the QN solver evaluates each block at solver-chosen
 points (`grad_phi` at the trial point), not only through full solves.
+
+## Addendum (2026-11-20): `mode="aladin"`
+
+A fourth mode, added after the plan was complete. It takes V2's coupled step but never evaluates it, as ALADIN does:
+x + Δx and λ + Δλ become the starting point and multipliers of the next sweep. Blocks are reached only through
+`solve()` and `grad_phi` at points their own solves produced: no trial-point `grad_phi`, no θ_trial, no skipping.
+A block that writes shared data predicts it linearly at the new point through the optional
+`QNSubproblem.predict_outputs(lin, dv)` (ranger: `aero_loads`, `CD`, `weight`, from the reported coupling Jacobians
+and grad_f; the airliner shares no data). With `guard=True` (default), a step whose next sweep ends with
+θ > `guard_accept` × θ before the step is undone, followed by V2's fallback multiplier update.
+
+Tests: the existing mode-parametrized tests cover it, plus `test_aladin_evaluates_blocks_only_at_their_own_solutions`,
+`test_aladin_guard_undoes_bad_steps` and `test_predict_outputs_first_order` (slow).
+
+Results to θ ≤ 1e-8 (idle machine, sweeps / wall time; same harness and budget as the tables above; prototype runs,
+whose iterates the integrated mode reproduces exactly when given the same inputs):
+
+| Problem | v2 | aladin, full steps | aladin, guarded |
+|---|---|---|---|
+| Airliner N = 4 | 13 / 14.6 s | 17 / 12.8 s | 17 / 12.4 s |
+| Airliner N = 8 | 13 / 35.6 s | 25 / 22.8 s | 28 / 23.0 s |
+| Ranger, μ0 = 10 | 27 / 93.4 s | 21 / 61.6 s | 22 / 63.7 s (32 / 47.7 s, see below) |
+| Ranger, μ0 = 1 | 9 / 26.5 s (v3) | — | 7 / 11.0 s |
+
+- It is faster than v2 in wall time because v2 rejected its early steps (airliner: κ sign flips at sweeps 1–3; ranger:
+  one θ_trial = 3.4 step) and then paid for expensive sweeps from unimproved points (airliner N = 8: 9.9, 11.0, 8.5 s).
+  Taking those steps anyway worked. In the tail it needs more sweeps than v2, since it measures θ only after sweeps,
+  where SLSQP's floor sits, but those sweeps cost ~0.2 s each on the airliner.
+- The guard rarely acts (0–6 undone steps per run) and changes little.
+- Ranger's rate is still linear at μ0 = 10 (≈ 0.45 per sweep): the penalty-curvature limit of the step is unchanged.
+- **Ranger runs are chaotic at round-off level.** The integrated mode predicts the weight from `grad_phi`'s outputs,
+  the prototype from the structures solve's output; the two differ by at most 9e-13 N (on ~6000 N), and that alone
+  moves the guarded run from 22 sweeps / 1 rejection to 32 sweeps / 6 rejections (θ 6.0e-9 vs 8.7e-9; checked by
+  running the prototype with either base value). Sweep counts of single ranger runs are therefore uncertain by tens
+  of percent, and the ranger rows above (and in the Task 6 table) should be read with that spread in mind; the
+  airliner runs reproduce exactly.

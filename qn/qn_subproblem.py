@@ -46,6 +46,14 @@ class QNSubproblem(Subproblem):
         grad_f + J^T lam + Jh^T kappa = 0 on the active rows, and 0 on inactive rows. Optional."""
         raise NotImplementedError
 
+    def predict_outputs(self, lin, dv) -> dict:
+        """Linear prediction of this block's shared outputs after its variables move by dv from the point of the
+        linearization ``lin`` (a grad_phi result), without evaluating the block. Optional; used by
+        QuasiNewtonALBCD's "aladin" mode, which never evaluates a block at the step it takes, so that a block
+        reading another block's outputs before that block re-solves sees predicted rather than stale data.
+        The default predicts no change (returns {}: data keeps the values from the linearization point)."""
+        return {}
+
     def scale(self, n):
         """The scale vector D of this block's n variables."""
         return np.ones(n) if self.x_scale is None else np.asarray(self.x_scale, dtype=float)

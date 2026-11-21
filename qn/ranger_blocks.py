@@ -5,7 +5,7 @@ Copied from examples/jax/ranger/ranger.py (read only): tau (line 23), the variab
 (152-158). The copied code is unchanged except:
   - SQPSubproblem subclasses QNSubproblem instead of Subproblem,
   - additions: x_scale on both blocks, the new jitted functions in setup(), grad_phi(), local_multipliers(),
-    tight_tol on the structures block, and the harvesting wrappers of the grad and jac callbacks in sqp()
+    predict_outputs(), tight_tol on the structures block, and the harvesting wrappers of the grad and jac callbacks in sqp()
     (gradients recorded without the proximal term).
 The example's models.py is imported through sys.path, not copied. Importing it takes ~30-40 s (STEP geometry).
 """
@@ -185,6 +185,13 @@ class AeroSubproblem(SQPSubproblem):
         return dict(grad_f=Jfull[0], c=F[1:1 + m], J=Jfull[1:1 + m], h=F[1 + m:], Jh=Jfull[1 + m:],
                     aero_loads=aero_loads, CD=CD)
 
+    def predict_outputs(self, lin, dv):
+        """c_aero[:2 num_nodes] = 1e-3 aero_loads and grad_f = grad(1e2 CD), so both outputs follow from grad_phi."""
+        out = lin["outputs"]
+        n = 2 * num_nodes
+        return {"aero_loads": np.asarray(out["aero_loads"]) + 1e3 * (lin["J"][:n] @ dv),
+                "CD": float(out["CD"] + 1e-2 * (lin["grad_f"] @ dv))}
+
 
 class StructSubproblem(SQPSubproblem):
     """Owns [thickness_cp, aero_loads_copy]: sizes the spar for stress and minimum gauge."""
@@ -239,6 +246,10 @@ class StructSubproblem(SQPSubproblem):
         return dict(grad_f=jnp.zeros_like(v), c=self.c_struct(v), J=jax.jacrev(self.c_struct)(v),
                     h=jnp.reshape(max_sigma_mpa - sigma_yield_mpa, 1), Jh=jax.jacrev(self.local_constraints)(v),
                     weight=weight)
+
+    def predict_outputs(self, lin, dv):
+        """c_struct[-1] = 1e-4 weight, so the weight follows from grad_phi."""
+        return {"weight": float(lin["outputs"]["weight"] + 1e4 * (lin["J"][-1] @ dv))}
 
     def local_multipliers(self):
         """kappa = -self.multipliers, active if |kappa| > act_tol max(1, |kappa|) or the stress is within 1e-8 of

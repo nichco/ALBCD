@@ -180,3 +180,37 @@ def test_outputs_match_solve(request, name):
     if name == "ranger":
         keys = set().union(*(sp.grad_phi(opt.x, opt.data)["outputs"] for sp in opt.subproblems))
         assert keys == {"aero_loads", "CD", "weight"}
+
+
+# ----------------------------------------------------------------------------------------------------------
+# 5. predicted outputs ("aladin" mode)
+# ----------------------------------------------------------------------------------------------------------
+
+@pytest.mark.parametrize("name", PROBLEMS)
+def test_predict_outputs_first_order(request, name):
+    """predict_outputs(lin, dv) matches grad_phi's outputs at v + dv to first order: the error shrinks ~4x when dv
+    halves, and is small next to the change itself. Blocks without shared outputs predict nothing."""
+    module, opt = get(request, name)
+    rng = np.random.default_rng(0)
+    for sp in opt.subproblems:
+        lin = sp.grad_phi(opt.x, opt.data)
+        v = np.array(opt.x[sp.index], dtype=float)
+        D = sp.scale(len(v))
+        if not lin["outputs"]:
+            assert sp.predict_outputs(lin, np.zeros_like(v)) == {}
+            continue
+        direction = rng.standard_normal(len(v)) / D  # a unit-size move in the scaled variables
+        errors, changes = [], []
+        for size in (1e-3, 5e-4):
+            dv = size * direction
+            dv = np.clip(v + dv, lin["xl"], lin["xu"]) - v
+            pred = sp.predict_outputs(lin, dv)
+            assert set(pred) == set(lin["outputs"])
+            actual = sp.grad_phi(sp.recompose(opt.x, v + dv), opt.data)["outputs"]
+            err = max(np.max(np.abs(np.asarray(pred[k]) - np.asarray(actual[k]))) for k in pred)
+            change = max(np.max(np.abs(np.asarray(actual[k]) - np.asarray(lin["outputs"][k]))) for k in pred)
+            errors.append(err)
+            changes.append(change)
+        label = type(sp).__name__
+        assert errors[0] <= 1e-2 * changes[0], f"{label}: error {errors[0]:.2e} vs change {changes[0]:.2e}"
+        assert errors[1] <= 0.4 * errors[0] or errors[0] <= 1e-12, f"{label}: errors {errors} not quadratic"

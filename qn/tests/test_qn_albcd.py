@@ -20,7 +20,7 @@ from qn_albcd import QuasiNewtonALBCD
 from qn_subproblem import QNSubproblem
 
 A_, B_ = 1.0, 3.0
-MODES = ["dual", "primal_dual", "adaptive"]
+MODES = ["dual", "primal_dual", "adaptive", "aladin"]
 
 
 # ----------------------------------------------------------------------------------------------------------
@@ -111,6 +111,44 @@ def test_all_steps_rejected_falls_back_to_albcd():
     assert opt.success and opt.theta <= 1e-10
     assert "qn_reject" in events and "qn_accept" not in events
     assert set(events) <= {"sweep", "qn_reject", "dual_fallback", "first_order", "mu_growth"}
+    np.testing.assert_allclose(opt.x, [2, 2], atol=1e-9)
+
+
+def test_aladin_evaluates_blocks_only_at_their_own_solutions():
+    """In "aladin" mode, every grad_phi call is at an x that a block solve returned: never at a step's trial point."""
+    calls = []
+
+    class Recording(Block):
+        def grad_phi(self, x, data):
+            calls.append(np.array(x, copy=True))
+            return super().grad_phi(x, data)
+
+    opt = make_solver(subproblems=[Recording(0, A_), Recording(1, B_)], mode="aladin").solve()
+    assert opt.success and opt.theta <= 1e-10
+    solved = opt.history["x"][1:]  # x after each block solve
+    assert calls and all(any(np.array_equal(c, s) for s in solved) for c in calls)
+    events = opt.history["event"]
+    assert "qn_step" in events and "qn_accept" in events
+    # every applied step is judged by the next sweep's theta, never evaluated itself
+    steps = [i for i, e in enumerate(events) if e == "qn_step"]
+    assert all(np.isnan(opt.history["theta"][i]) for i in steps)
+
+    # the same check fails for primal_dual, which evaluates its trial points
+    calls.clear()
+    pd = make_solver(subproblems=[Recording(0, A_), Recording(1, B_)], mode="primal_dual").solve()
+    assert pd.success
+    assert not all(any(np.array_equal(c, s) for s in pd.history["x"][1:]) for c in calls)
+
+
+def test_aladin_guard_undoes_bad_steps():
+    """B0 = 0.05 (true block curvature 2 + mu = 3) makes the first steps overshoot ~60x: the next sweep then ends with
+    a larger theta, and the guard returns to the pre-step point; the BFGS pairs then correct B and it converges."""
+    opt = make_solver(mode="aladin", B0={0: [[0.05]], 1: [[0.05]]}, refine=0).solve()
+    events, reasons = opt.history["event"], opt.history["reason"]
+    rejected = [i for i, e in enumerate(events) if e == "qn_reject"]
+    assert rejected and all(reasons[i] == "next_sweep" for i in rejected)
+    assert all(events[i + 1] in ("dual_fallback", "first_order") for i in rejected)
+    assert opt.success and opt.theta <= 1e-10
     np.testing.assert_allclose(opt.x, [2, 2], atol=1e-9)
 
 

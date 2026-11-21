@@ -12,11 +12,19 @@ Modes
     "dual"         (V1) ALBCD's inner loop, then only the multiplier part of the step: y <- lam + dlam.
     "primal_dual"  (V2) ``sweeps`` sweeps, then the full step (x, kappa, y).
     "adaptive"     (V3) V2, but the next sweep is skipped after a step that reduced theta by ``skip_factor``.
+    "aladin"       V2's step, applied without evaluating it, ALADIN-style: x + dx and lam + dlam become the starting
+                   point and multipliers of the next sweep. Blocks are reached only through solve() and grad_phi at
+                   the points their own solves produced (no trial-point grad_phi, no theta_trial, no skipping).
+                   Shared outputs at the new point come from QNSubproblem.predict_outputs (linear predictions).
+                   With ``guard`` (default), a step whose next sweep ends with theta > guard_accept * theta before
+                   the step is undone (the solver returns to the pre-step point) and V2's fallback multiplier
+                   update is applied instead.
 
 The solver depends only on numpy and albcd; blocks must be QNSubproblem instances that implement grad_phi and
 local_multipliers.
 """
 
+import copy
 import time
 import numpy as np
 from albcd import ALBCD
@@ -24,7 +32,7 @@ from albcd import ALBCD
 import qn_core as qc
 from qn_subproblem import QNSubproblem
 
-MODES = ("dual", "primal_dual", "adaptive")
+MODES = ("dual", "primal_dual", "adaptive", "aladin")
 PAIRS = ("outer", "harvest", "both")
 
 
@@ -64,6 +72,8 @@ class QuasiNewtonALBCD(ALBCD):
                  mu_growth_after: int = 2,
                  act_tol: float = 1e-8,
                  bnd_tol: float = 1e-8,
+                 guard: bool = True,
+                 guard_accept: float = 1.0,
                  B0: dict = None,
                  **kwargs):
 
@@ -85,6 +95,8 @@ class QuasiNewtonALBCD(ALBCD):
         self.mu_growth_after = mu_growth_after
         self.act_tol = act_tol
         self.bnd_tol = bnd_tol
+        self.guard = guard                # "aladin" mode only
+        self.guard_accept = guard_accept  # "aladin" mode only
         self.B0 = {} if B0 is None else dict(B0)
 
         nb = len(self.subproblems)
@@ -312,6 +324,8 @@ class QuasiNewtonALBCD(ALBCD):
         self.kloc = [None] * len(self.subproblems)
         if self.mode == "dual":
             self._solve_dual()
+        elif self.mode == "aladin":
+            self._solve_aladin()
         else:
             self._solve_primal_dual()
         self.tf = time.perf_counter() - self._t0
@@ -411,6 +425,74 @@ class QuasiNewtonALBCD(ALBCD):
                 if rejections >= self.mu_growth_after:
                     self._grow_mu(self.phi, phi_old)
             phi_old = self.phi.copy()
+        self.status = "max_outer_iter"
+
+    def _solve_aladin(self):
+        """ALADIN-style iteration: sweep, grad_phi at the post-sweep point, coupled step applied unevaluated.
+
+        Events: "qn_step" when a step is applied (theta NaN: it is not evaluated), then "qn_accept" or, with the guard,
+        "qn_reject" (reason "next_sweep") with the post-sweep theta the step led to.
+        """
+        rejections = 0
+        phi_old = np.full_like(self.mu, np.inf)
+        saved = None  # the post-sweep state at which the latest, not yet judged, step was taken
+        for k in range(1, self.max_outer_iter + 1):
+            self._inner_loop(self.sweeps)
+            lam = self.y + self.mu * self.phi
+            theta, t_lin = self._linearize_all(lam)
+            self._patch_last_event(theta, t_lin)
+
+            if saved is not None:  # judge the previous step by where the sweep from it ended
+                if self.guard and not theta <= self.guard_accept * saved["theta"]:
+                    self._event("qn_reject", theta, reason="next_sweep")
+                    self.x, self.data, self.phi = saved["x"], saved["data"], saved["phi"]
+                    self.kloc, self.points, self.theta = saved["kloc"], saved["points"], saved["theta"]
+                    lam, dlam = saved["lam"], saved["dlam"]
+                    saved = None
+                    rejections += 1
+                    if self._dual_ok(dlam, lam):
+                        self.y = self._clip_y(lam + dlam)
+                        self._event("dual_fallback")
+                    else:
+                        self.y = self._clip_y(lam)
+                        self._event("first_order")
+                    if rejections >= self.mu_growth_after:
+                        self._grow_mu(self.phi, phi_old)
+                    phi_old = self.phi.copy()
+                    continue
+                self._event("qn_accept", theta)
+                rejections = 0
+                saved = None
+
+            self.theta = theta
+            self._log(f"outer {k}: theta {theta:.3e}")
+            if theta <= self.kkt_tol:
+                self.success, self.status = True, "kkt_tol"
+                return
+
+            step = self._step(lam)
+            if step is None:
+                self._event("qn_reject", np.nan, reason="singular_K")
+                self.y = self._clip_y(lam)
+                self._event("first_order")
+                phi_old = self.phi.copy()
+                continue
+            dx, _, dlam, t_fac, t_coord, cond = step
+            saved = dict(x=self.x.copy(), data=copy.deepcopy(self.data), phi=self.phi.copy(),
+                         kloc=[kl.copy() for kl in self.kloc], points=list(self.points), lam=lam, dlam=dlam,
+                         theta=theta)
+            x_new = self.x.copy()
+            for i, (sp, p) in enumerate(zip(self.subproblems, self.points)):
+                lin = p["lin"]
+                v = np.clip(lin["v"] + dx[i], lin["xl"], lin["xu"])
+                dv = v - lin["v"]
+                x_new[sp.index] = v
+                self.data.update(sp.predict_outputs(lin, dv))
+                self.phi = self.phi + lin["J"] @ dv  # linear prediction; the next sweep recomputes phi
+            self.x = x_new
+            self.y = self._clip_y(lam + dlam)
+            self._event("qn_step", np.nan, t_fac + t_coord, cond)
+            phi_old = saved["phi"]
         self.status = "max_outer_iter"
 
     def _solve_dual(self):
